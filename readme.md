@@ -1,0 +1,4 @@
+# DoWithTime
+Todolist with timer assigned to each task. Whenever you try to create a task you will need to add a time duration associated with it. and you can also reorganize tasks. then there is the do screen where it shows the topmost task. and has like a big ol play button. so you can start that task and the timer will start going down. if you finish a task it'll be a ten second timer transition to the next task. if you don't finisht the task in time a really loud noise will start playing. 
+
+you can also customize the noise later to set it to something inappropriate like women moaning so you have to do it in time. it should also have a notification like the clock app where it allows you to stop/pause/reset it from the notifications bar.
