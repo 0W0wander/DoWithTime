@@ -139,6 +139,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     
     fun startCurrentTask() {
         _currentTask.value?.let { task ->
+            // Immediately set the time remaining to the current task's duration
+            _timeRemaining.value = task.durationSeconds * 1000L
             // Always reset the timer to the current task's duration
             timerService?.startTask(task)
         }
@@ -163,6 +165,10 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     }
     
     fun resetTimer() {
+        _currentTask.value?.let { task ->
+            // Immediately set the time remaining to the current task's duration
+            _timeRemaining.value = task.durationSeconds * 1000L
+        }
         timerService?.let { service ->
             val intent = android.content.Intent(getApplication(), TimerService::class.java).apply {
                 action = TimerService.ACTION_RESET
@@ -217,6 +223,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         
         if (nextTask != null) {
             _currentTask.value = nextTask
+            // Immediately set the time remaining to the next task's duration
+            _timeRemaining.value = nextTask.durationSeconds * 1000L
             // Start the next task automatically with its correct duration
             startCurrentTask()
         } else {
@@ -230,6 +238,10 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         val incompleteTasks = repository.incompleteTasksState.value
         if (_currentTask.value == null || !incompleteTasks.contains(_currentTask.value)) {
             _currentTask.value = incompleteTasks.firstOrNull()
+            // Set the time remaining to the current task's duration
+            _currentTask.value?.let { task ->
+                _timeRemaining.value = task.durationSeconds * 1000L
+            }
         }
     }
 } 

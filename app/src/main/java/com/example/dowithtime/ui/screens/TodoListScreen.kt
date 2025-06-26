@@ -5,16 +5,24 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import com.example.dowithtime.data.Task
 import com.example.dowithtime.viewmodel.TaskViewModel
 
@@ -26,6 +34,8 @@ fun TodoListScreen(
 ) {
     val tasks by viewModel.tasks.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
+    var draggedItem by remember { mutableStateOf<Task?>(null) }
+    var draggedItemIndex by remember { mutableStateOf(-1) }
     
     Column(
         modifier = Modifier
@@ -68,15 +78,34 @@ fun TodoListScreen(
                 )
             }
         } else {
+            val listState = rememberLazyListState()
+            
             LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(8.dp)
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                state = listState
             ) {
-                itemsIndexed(tasks) { index, task ->
-                    TaskItem(
+                itemsIndexed(
+                    items = tasks,
+                    key = { _, task -> task.id }
+                ) { index, task ->
+                    DraggableTaskItem(
                         task = task,
+                        index = index,
+                        tasks = tasks,
+                        isDragging = draggedItem?.id == task.id,
                         onDelete = { viewModel.deleteTask(task) },
                         onComplete = { viewModel.markTaskCompleted(task) },
-                        onClick = { /* You can add task editing functionality here */ }
+                        onDragStart = { 
+                            draggedItem = task
+                            draggedItemIndex = index
+                        },
+                        onDragEnd = { 
+                            draggedItem = null
+                            draggedItemIndex = -1
+                        },
+                        onMove = { fromIndex, toIndex ->
+                            viewModel.reorderTasks(fromIndex, toIndex)
+                        }
                     )
                 }
             }
@@ -140,6 +169,135 @@ fun TaskItem(
                 modifier = Modifier
                     .weight(1f)
                     .clickable { onClick() }
+            ) {
+                Text(
+                    text = task.title,
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                Text(
+                    text = formatDuration(task.durationSeconds),
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            
+            Row {
+                Button(
+                    onClick = onComplete,
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.tertiary
+                    )
+                ) {
+                    Text("Complete")
+                }
+                
+                Spacer(modifier = Modifier.width(8.dp))
+                
+                IconButton(onClick = onDelete) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "Delete",
+                        tint = MaterialTheme.colorScheme.error
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun DraggableTaskItem(
+    task: Task,
+    index: Int,
+    tasks: List<Task>,
+    isDragging: Boolean,
+    onDelete: () -> Unit,
+    onComplete: () -> Unit,
+    onDragStart: () -> Unit,
+    onDragEnd: () -> Unit,
+    onMove: (Int, Int) -> Unit
+) {
+    val density = LocalDensity.current
+    var dragOffset by remember { mutableStateOf(0f) }
+    var isBeingDragged by remember { mutableStateOf(false) }
+    
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer {
+                translationY = dragOffset
+                alpha = if (isDragging || isBeingDragged) 0.8f else 1f
+                scaleX = if (isDragging || isBeingDragged) 1.05f else 1f
+                scaleY = if (isDragging || isBeingDragged) 1.05f else 1f
+                shadowElevation = if (isDragging || isBeingDragged) 8f else 2f
+            }
+            .zIndex(if (isDragging || isBeingDragged) 1f else 0f)
+            .pointerInput(task.id) {
+                detectDragGestures(
+                    onDragStart = { 
+                        isBeingDragged = true
+                        onDragStart()
+                    },
+                    onDragEnd = {
+                        isBeingDragged = false
+                        dragOffset = 0f
+                        onDragEnd()
+                    },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        dragOffset += dragAmount.y
+                        
+                        // Simple threshold-based reordering
+                        val threshold = 40.dp
+                        val thresholdPx = with(density) { threshold.toPx() }
+                        
+                        if (dragOffset > thresholdPx && index < tasks.size - 1) {
+                            // Move down
+                            onMove(index, index + 1)
+                            dragOffset = 0f
+                        } else if (dragOffset < -thresholdPx && index > 0) {
+                            // Move up
+                            onMove(index, index - 1)
+                            dragOffset = 0f
+                        }
+                    }
+                )
+            },
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Drag handle
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "${index + 1}",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Icon(
+                    Icons.Default.MoreVert,
+                    contentDescription = "Drag to reorder",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+            
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 8.dp)
             ) {
                 Text(
                     text = task.title,

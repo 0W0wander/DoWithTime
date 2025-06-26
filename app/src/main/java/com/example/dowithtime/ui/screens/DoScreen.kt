@@ -35,6 +35,14 @@ fun DoScreen(
     var lastClickTime by remember { mutableStateOf(0L) }
     val doubleClickThreshold = 300L // milliseconds
     
+    // Stop timer when leaving the screen
+    DisposableEffect(Unit) {
+        onDispose {
+            // Stop the timer when leaving the DoScreen
+            viewModel.stopTimer()
+        }
+    }
+    
     // Refresh current task when screen is displayed
     LaunchedEffect(Unit) {
         viewModel.refreshCurrentTask()
@@ -260,7 +268,11 @@ fun DoScreen(
         
         // Back button
         OutlinedButton(
-            onClick = onNavigateBack,
+            onClick = {
+                // Stop the timer before navigating back
+                viewModel.stopTimer()
+                onNavigateBack()
+            },
             modifier = Modifier.fillMaxWidth()
         ) {
             Text("Back to Tasks")
