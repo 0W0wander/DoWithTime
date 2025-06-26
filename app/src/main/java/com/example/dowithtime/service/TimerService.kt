@@ -16,6 +16,7 @@ import kotlinx.coroutines.flow.StateFlow
 class TimerService : Service() {
     private val binder = TimerBinder()
     private var countDownTimer: CountDownTimer? = null
+    private var transitionTimer: CountDownTimer? = null
     private var mediaPlayer: MediaPlayer? = null
     
     private val _currentTask = MutableStateFlow<Task?>(null)
@@ -30,6 +31,15 @@ class TimerService : Service() {
     private val _isPaused = MutableStateFlow(false)
     val isPaused: StateFlow<Boolean> = _isPaused
     
+    private val _showAlarm = MutableStateFlow(false)
+    val showAlarm: StateFlow<Boolean> = _showAlarm
+    
+    private val _isTransitioning = MutableStateFlow(false)
+    val isTransitioning: StateFlow<Boolean> = _isTransitioning
+    
+    private val _transitionTime = MutableStateFlow(10)
+    val transitionTime: StateFlow<Int> = _transitionTime
+    
     companion object {
         const val CHANNEL_ID = "TimerChannel"
         const val NOTIFICATION_ID = 1
@@ -37,6 +47,8 @@ class TimerService : Service() {
         const val ACTION_PAUSE = "PAUSE"
         const val ACTION_STOP = "STOP"
         const val ACTION_RESET = "RESET"
+        const val ACTION_NEXT_TASK = "NEXT_TASK"
+        const val ACTION_STOP_ALARM = "STOP_ALARM"
     }
     
     inner class TimerBinder : Binder() {
@@ -58,13 +70,17 @@ class TimerService : Service() {
             ACTION_PAUSE -> pauseTimer()
             ACTION_STOP -> stopTimer()
             ACTION_RESET -> resetTimer()
+            ACTION_NEXT_TASK -> nextTask()
+            ACTION_STOP_ALARM -> stopAlarm()
         }
         return START_NOT_STICKY
     }
     
     fun startTask(task: Task) {
         _currentTask.value = task
-        _timeRemaining.value = task.durationMinutes * 60 * 1000L
+        _timeRemaining.value = task.durationSeconds * 1000L
+        _showAlarm.value = false
+        _isTransitioning.value = false
         startTimer()
         startForeground(NOTIFICATION_ID, createNotification())
     }
@@ -84,7 +100,7 @@ class TimerService : Service() {
             override fun onFinish() {
                 _timeRemaining.value = 0
                 _isRunning.value = false
-                playAlarm()
+                showAlarmScreen()
                 updateNotification()
             }
         }.start()
@@ -101,10 +117,13 @@ class TimerService : Service() {
     
     private fun stopTimer() {
         countDownTimer?.cancel()
+        transitionTimer?.cancel()
         _isRunning.value = false
         _isPaused.value = false
         _timeRemaining.value = 0
         _currentTask.value = null
+        _showAlarm.value = false
+        _isTransitioning.value = false
         stopAlarm()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
@@ -115,23 +134,53 @@ class TimerService : Service() {
         _isRunning.value = false
         _isPaused.value = false
         _currentTask.value?.let { task ->
-            _timeRemaining.value = task.durationMinutes * 60 * 1000L
+            _timeRemaining.value = task.durationSeconds * 1000L
         }
         updateNotification()
     }
     
-    private fun playAlarm() {
-        // For now, using system default alarm sound
-        // Later you can customize this to play custom sounds
-        mediaPlayer = MediaPlayer.create(this, android.provider.Settings.System.DEFAULT_ALARM_ALERT_URI)
-        mediaPlayer?.isLooping = true
-        mediaPlayer?.start()
+    private fun showAlarmScreen() {
+        _showAlarm.value = true
+        playAlarm()
     }
     
     private fun stopAlarm() {
+        _showAlarm.value = false
         mediaPlayer?.stop()
         mediaPlayer?.release()
         mediaPlayer = null
+    }
+    
+    private fun nextTask() {
+        stopAlarm()
+        startTransition()
+    }
+    
+    private fun startTransition() {
+        _isTransitioning.value = true
+        _transitionTime.value = 10
+        
+        transitionTimer = object : CountDownTimer(10000, 1000) {
+            override fun onTick(millisUntilFinished: Long) {
+                _transitionTime.value = (millisUntilFinished / 1000).toInt()
+                updateNotification()
+            }
+            
+            override fun onFinish() {
+                _isTransitioning.value = false
+                // The ViewModel will handle moving to the next task
+                updateNotification()
+            }
+        }.start()
+    }
+    
+    private fun playAlarm() {
+        // Play a short alarm sound instead of continuous loop
+        mediaPlayer = MediaPlayer.create(this, android.provider.Settings.System.DEFAULT_ALARM_ALERT_URI)
+        mediaPlayer?.setOnCompletionListener {
+            // Don't loop, just play once
+        }
+        mediaPlayer?.start()
     }
     
     private fun createNotificationChannel() {
@@ -154,8 +203,18 @@ class TimerService : Service() {
         val seconds = (timeRemaining / 1000) % 60
         val timeText = String.format("%02d:%02d", minutes, seconds)
         
-        val title = task?.title ?: "No task"
-        val text = if (_isRunning.value) "Time remaining: $timeText" else "Timer paused"
+        val title = when {
+            _showAlarm.value -> "Time's Up!"
+            _isTransitioning.value -> "Next task in ${_transitionTime.value}s"
+            else -> task?.title ?: "No task"
+        }
+        
+        val text = when {
+            _showAlarm.value -> "Task time has expired"
+            _isTransitioning.value -> "Preparing next task..."
+            _isRunning.value -> "Time remaining: $timeText"
+            else -> "Timer paused"
+        }
         
         val intent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
@@ -183,20 +242,47 @@ class TimerService : Service() {
             this, 3, resetIntent, PendingIntent.FLAG_IMMUTABLE
         )
         
-        return NotificationCompat.Builder(this, CHANNEL_ID)
+        val nextTaskIntent = Intent(this, TimerService::class.java).apply {
+            action = ACTION_NEXT_TASK
+        }
+        val nextTaskPendingIntent = PendingIntent.getService(
+            this, 4, nextTaskIntent, PendingIntent.FLAG_IMMUTABLE
+        )
+        
+        val stopAlarmIntent = Intent(this, TimerService::class.java).apply {
+            action = ACTION_STOP_ALARM
+        }
+        val stopAlarmPendingIntent = PendingIntent.getService(
+            this, 5, stopAlarmIntent, PendingIntent.FLAG_IMMUTABLE
+        )
+        
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(text)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentIntent(pendingIntent)
-            .addAction(
-                R.drawable.ic_launcher_foreground,
-                if (_isRunning.value) "Pause" else "Start",
-                startPausePendingIntent
-            )
-            .addAction(R.drawable.ic_launcher_foreground, "Stop", stopPendingIntent)
-            .addAction(R.drawable.ic_launcher_foreground, "Reset", resetPendingIntent)
             .setOngoing(true)
-            .build()
+        
+        when {
+            _showAlarm.value -> {
+                builder.addAction(R.drawable.ic_launcher_foreground, "Stop Alarm", stopAlarmPendingIntent)
+                    .addAction(R.drawable.ic_launcher_foreground, "Next Task", nextTaskPendingIntent)
+            }
+            _isTransitioning.value -> {
+                builder.addAction(R.drawable.ic_launcher_foreground, "Stop", stopPendingIntent)
+            }
+            else -> {
+                builder.addAction(
+                    R.drawable.ic_launcher_foreground,
+                    if (_isRunning.value) "Pause" else "Start",
+                    startPausePendingIntent
+                )
+                    .addAction(R.drawable.ic_launcher_foreground, "Stop", stopPendingIntent)
+                    .addAction(R.drawable.ic_launcher_foreground, "Reset", resetPendingIntent)
+            }
+        }
+        
+        return builder.build()
     }
     
     private fun updateNotification() {
@@ -207,6 +293,7 @@ class TimerService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         countDownTimer?.cancel()
+        transitionTimer?.cancel()
         stopAlarm()
     }
 } 

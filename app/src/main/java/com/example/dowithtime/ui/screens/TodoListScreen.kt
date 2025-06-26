@@ -1,5 +1,6 @@
 package com.example.dowithtime.ui.screens
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -74,7 +75,8 @@ fun TodoListScreen(
                     TaskItem(
                         task = task,
                         onDelete = { viewModel.deleteTask(task) },
-                        onComplete = { viewModel.markTaskCompleted(task) }
+                        onComplete = { viewModel.markTaskCompleted(task) },
+                        onClick = { /* You can add task editing functionality here */ }
                     )
                 }
             }
@@ -104,8 +106,8 @@ fun TodoListScreen(
     if (showAddDialog) {
         AddTaskDialog(
             onDismiss = { showAddDialog = false },
-            onAddTask = { title, duration ->
-                viewModel.addTask(title, duration)
+            onAddTask = { title, durationSeconds ->
+                viewModel.addTask(title, durationSeconds)
                 showAddDialog = false
             }
         )
@@ -116,10 +118,13 @@ fun TodoListScreen(
 fun TaskItem(
     task: Task,
     onDelete: () -> Unit,
-    onComplete: () -> Unit
+    onComplete: () -> Unit,
+    onClick: () -> Unit
 ) {
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
         )
@@ -132,7 +137,9 @@ fun TaskItem(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable { onClick() }
             ) {
                 Text(
                     text = task.title,
@@ -140,7 +147,7 @@ fun TaskItem(
                     fontWeight = FontWeight.Medium
                 )
                 Text(
-                    text = "${task.durationMinutes} minutes",
+                    text = formatDuration(task.durationSeconds),
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -170,6 +177,18 @@ fun TaskItem(
     }
 }
 
+private fun formatDuration(durationSeconds: Int): String {
+    val minutes = durationSeconds / 60
+    val seconds = durationSeconds % 60
+    
+    return when {
+        minutes > 0 && seconds > 0 -> "${minutes}m ${seconds}s"
+        minutes > 0 -> "${minutes}m"
+        seconds > 0 -> "${seconds}s"
+        else -> "0s"
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AddTaskDialog(
@@ -177,7 +196,8 @@ fun AddTaskDialog(
     onAddTask: (String, Int) -> Unit
 ) {
     var title by remember { mutableStateOf("") }
-    var duration by remember { mutableStateOf("") }
+    var minutes by remember { mutableStateOf("") }
+    var seconds by remember { mutableStateOf("") }
     var titleError by remember { mutableStateOf(false) }
     var durationError by remember { mutableStateOf(false) }
     
@@ -197,18 +217,53 @@ fun AddTaskDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
                 
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Text(
+                    text = "Duration",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                
                 Spacer(modifier = Modifier.height(8.dp))
                 
-                OutlinedTextField(
-                    value = duration,
-                    onValueChange = { 
-                        duration = it
-                        durationError = false
-                    },
-                    label = { Text("Duration (minutes)") },
-                    isError = durationError,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = minutes,
+                        onValueChange = { 
+                            minutes = it.filter { char -> char.isDigit() }
+                            durationError = false
+                        },
+                        label = { Text("Minutes") },
+                        isError = durationError,
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                    
+                    OutlinedTextField(
+                        value = seconds,
+                        onValueChange = { 
+                            seconds = it.filter { char -> char.isDigit() }
+                            durationError = false
+                        },
+                        label = { Text("Seconds") },
+                        isError = durationError,
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                }
+                
+                if (durationError) {
+                    Text(
+                        text = "Please enter a valid duration (at least 1 second)",
+                        color = MaterialTheme.colorScheme.error,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
             }
         },
         confirmButton = {
@@ -218,12 +273,17 @@ fun AddTaskDialog(
                         titleError = true
                         return@Button
                     }
-                    val durationInt = duration.toIntOrNull()
-                    if (durationInt == null || durationInt <= 0) {
+                    
+                    val minutesInt = minutes.toIntOrNull() ?: 0
+                    val secondsInt = seconds.toIntOrNull() ?: 0
+                    val totalSeconds = minutesInt * 60 + secondsInt
+                    
+                    if (totalSeconds <= 0) {
                         durationError = true
                         return@Button
                     }
-                    onAddTask(title, durationInt)
+                    
+                    onAddTask(title, totalSeconds)
                 }
             ) {
                 Text("Add")

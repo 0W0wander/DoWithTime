@@ -1,10 +1,21 @@
 package com.example.dowithtime.data
 
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 
 class TaskRepository(private val taskDao: TaskDao) {
     val allTasks: Flow<List<Task>> = taskDao.getAllTasks()
     val incompleteTasks: Flow<List<Task>> = taskDao.getIncompleteTasks()
+    
+    // StateFlow for synchronous access
+    private val _incompleteTasksState = MutableStateFlow<List<Task>>(emptyList())
+    val incompleteTasksState: StateFlow<List<Task>> = _incompleteTasksState
+    
+    init {
+        // Update the state flow when incomplete tasks change
+        // This will be handled by the ViewModel
+    }
     
     suspend fun insertTask(task: Task) {
         taskDao.insertTask(task)
@@ -24,5 +35,10 @@ class TaskRepository(private val taskDao: TaskDao) {
     
     suspend fun markTaskCompleted(taskId: Int) {
         taskDao.markTaskCompleted(taskId)
+    }
+    
+    // Method to update the state flow
+    fun updateIncompleteTasksState(tasks: List<Task>) {
+        _incompleteTasksState.value = tasks
     }
 } 

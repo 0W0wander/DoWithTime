@@ -29,6 +29,15 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val _isPaused = MutableStateFlow(false)
     val isPaused: StateFlow<Boolean> = _isPaused.asStateFlow()
     
+    private val _showAlarm = MutableStateFlow(false)
+    val showAlarm: StateFlow<Boolean> = _showAlarm.asStateFlow()
+    
+    private val _isTransitioning = MutableStateFlow(false)
+    val isTransitioning: StateFlow<Boolean> = _isTransitioning.asStateFlow()
+    
+    private val _transitionTime = MutableStateFlow(10)
+    val transitionTime: StateFlow<Int> = _transitionTime.asStateFlow()
+    
     private var timerService: TimerService? = null
     
     init {
@@ -38,19 +47,21 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.incompleteTasks.collect { taskList ->
                 _tasks.value = taskList
-                if (_currentTask.value == null && taskList.isNotEmpty()) {
-                    _currentTask.value = taskList.first()
+                repository.updateIncompleteTasksState(taskList)
+                // Update current task if it's null or if the current task is no longer in the list
+                if (_currentTask.value == null || !taskList.contains(_currentTask.value)) {
+                    _currentTask.value = taskList.firstOrNull()
                 }
             }
         }
     }
     
-    fun addTask(title: String, durationMinutes: Int) {
+    fun addTask(title: String, durationSeconds: Int) {
         viewModelScope.launch {
             val newOrder = _tasks.value.size
             val task = Task(
                 title = title,
-                durationMinutes = durationMinutes,
+                durationSeconds = durationSeconds,
                 order = newOrder
             )
             repository.insertTask(task)
@@ -66,11 +77,6 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     fun markTaskCompleted(task: Task) {
         viewModelScope.launch {
             repository.markTaskCompleted(task.id)
-            // If this was the current task, move to next
-            if (_currentTask.value?.id == task.id) {
-                val nextTask = _tasks.value.find { it.id != task.id && !it.isCompleted }
-                _currentTask.value = nextTask
-            }
         }
     }
     
@@ -109,6 +115,25 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 _isPaused.value = paused
             }
         }
+        viewModelScope.launch {
+            service.showAlarm.collect { show ->
+                _showAlarm.value = show
+            }
+        }
+        viewModelScope.launch {
+            service.isTransitioning.collect { transitioning ->
+                _isTransitioning.value = transitioning
+                if (!transitioning) {
+                    // When transition ends, move to next task
+                    moveToNextTask()
+                }
+            }
+        }
+        viewModelScope.launch {
+            service.transitionTime.collect { time ->
+                _transitionTime.value = time
+            }
+        }
     }
     
     fun startCurrentTask() {
@@ -141,6 +166,53 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 action = TimerService.ACTION_RESET
             }
             getApplication<Application>().startService(intent)
+        }
+    }
+    
+    fun nextTask() {
+        timerService?.let { service ->
+            val intent = android.content.Intent(getApplication(), TimerService::class.java).apply {
+                action = TimerService.ACTION_NEXT_TASK
+            }
+            getApplication<Application>().startService(intent)
+        }
+    }
+    
+    fun stopAlarm() {
+        timerService?.let { service ->
+            val intent = android.content.Intent(getApplication(), TimerService::class.java).apply {
+                action = TimerService.ACTION_STOP_ALARM
+            }
+            getApplication<Application>().startService(intent)
+        }
+    }
+    
+    fun completeCurrentTaskEarly() {
+        _currentTask.value?.let { task ->
+            markTaskCompleted(task)
+            nextTask()
+        }
+    }
+    
+    private fun moveToNextTask() {
+        val currentTaskId = _currentTask.value?.id
+        val incompleteTasks = _tasks.value.filter { it.id != currentTaskId }
+        
+        if (incompleteTasks.isNotEmpty()) {
+            _currentTask.value = incompleteTasks.first()
+            // Start the next task automatically
+            startCurrentTask()
+        } else {
+            // No more tasks, stop the timer
+            stopTimer()
+        }
+    }
+    
+    // Method to refresh current task from database
+    fun refreshCurrentTask() {
+        val incompleteTasks = repository.incompleteTasksState.value
+        if (_currentTask.value == null || !incompleteTasks.contains(_currentTask.value)) {
+            _currentTask.value = incompleteTasks.firstOrNull()
         }
     }
 } 

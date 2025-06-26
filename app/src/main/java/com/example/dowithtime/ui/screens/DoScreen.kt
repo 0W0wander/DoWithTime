@@ -24,6 +24,23 @@ fun DoScreen(
     val timeRemaining by viewModel.timeRemaining.collectAsState()
     val isRunning by viewModel.isRunning.collectAsState()
     val isPaused by viewModel.isPaused.collectAsState()
+    val showAlarm by viewModel.showAlarm.collectAsState()
+    val isTransitioning by viewModel.isTransitioning.collectAsState()
+    val transitionTime by viewModel.transitionTime.collectAsState()
+    
+    // Refresh current task when screen is displayed
+    LaunchedEffect(Unit) {
+        viewModel.refreshCurrentTask()
+    }
+    
+    // Show alarm screen when time runs out
+    if (showAlarm) {
+        AlarmScreen(
+            task = currentTask,
+            onStopAlarm = { viewModel.stopAlarm() },
+            onNextTask = { viewModel.nextTask() }
+        )
+    }
     
     Column(
         modifier = Modifier
@@ -53,7 +70,7 @@ fun DoScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = "Current Task",
+                        text = if (isTransitioning) "Next Task" else "Current Task",
                         fontSize = 16.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -70,7 +87,7 @@ fun DoScreen(
                     Spacer(modifier = Modifier.height(8.dp))
                     
                     Text(
-                        text = "${task.durationMinutes} minutes",
+                        text = formatDuration(task.durationSeconds),
                         fontSize = 14.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -108,33 +125,60 @@ fun DoScreen(
         
         // Timer display
         if (currentTask != null) {
-            val minutes = (timeRemaining / 1000) / 60
-            val seconds = (timeRemaining / 1000) % 60
-            val timeText = String.format("%02d:%02d", minutes, seconds)
-            
-            Text(
-                text = timeText,
-                fontSize = 48.sp,
-                fontWeight = FontWeight.Bold,
-                color = if (isRunning) MaterialTheme.colorScheme.primary 
-                        else MaterialTheme.colorScheme.onSurface
-            )
-            
-            Spacer(modifier = Modifier.height(8.dp))
-            
-            Text(
-                text = if (isRunning) "Time remaining" 
-                       else if (isPaused) "Paused" 
-                       else "Ready to start",
-                fontSize = 16.sp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            if (isTransitioning) {
+                // Show transition countdown
+                Text(
+                    text = "Next task in",
+                    fontSize = 16.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Text(
+                    text = "${transitionTime}s",
+                    fontSize = 48.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Text(
+                    text = "Preparing next task...",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            } else {
+                // Show normal timer
+                val minutes = (timeRemaining / 1000) / 60
+                val seconds = (timeRemaining / 1000) % 60
+                val timeText = String.format("%02d:%02d", minutes, seconds)
+                
+                Text(
+                    text = timeText,
+                    fontSize = 48.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isRunning) MaterialTheme.colorScheme.primary 
+                            else MaterialTheme.colorScheme.onSurface
+                )
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Text(
+                    text = if (isRunning) "Time remaining" 
+                           else if (isPaused) "Paused" 
+                           else "Ready to start",
+                    fontSize = 16.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
         
         Spacer(modifier = Modifier.height(32.dp))
         
-        // Big play/pause button
-        if (currentTask != null) {
+        // Big play/pause button (only show when not transitioning)
+        if (currentTask != null && !isTransitioning) {
             Button(
                 onClick = {
                     if (isRunning) {
@@ -163,8 +207,8 @@ fun DoScreen(
         
         Spacer(modifier = Modifier.height(24.dp))
         
-        // Control buttons
-        if (currentTask != null) {
+        // Control buttons (only show when not transitioning)
+        if (currentTask != null && !isTransitioning) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(16.dp)
             ) {
@@ -175,15 +219,9 @@ fun DoScreen(
                 }
                 
                 OutlinedButton(
-                    onClick = { viewModel.stopTimer() }
+                    onClick = { viewModel.completeCurrentTaskEarly() }
                 ) {
-                    Image(
-                        painter = painterResource(R.drawable.ic_stop),
-                        contentDescription = "Stop",
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Stop")
+                    Text("Next Task")
                 }
             }
         }
@@ -197,5 +235,17 @@ fun DoScreen(
         ) {
             Text("Back to Tasks")
         }
+    }
+}
+
+private fun formatDuration(durationSeconds: Int): String {
+    val minutes = durationSeconds / 60
+    val seconds = durationSeconds % 60
+    
+    return when {
+        minutes > 0 && seconds > 0 -> "${minutes}m ${seconds}s"
+        minutes > 0 -> "${minutes}m"
+        seconds > 0 -> "${seconds}s"
+        else -> "0s"
     }
 } 
