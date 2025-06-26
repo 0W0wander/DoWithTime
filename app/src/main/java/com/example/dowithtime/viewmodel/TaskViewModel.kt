@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.delay
 
 class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val repository: TaskRepository
@@ -138,6 +139,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     
     fun startCurrentTask() {
         _currentTask.value?.let { task ->
+            // Always reset the timer to the current task's duration
             timerService?.startTask(task)
         }
     }
@@ -178,6 +180,15 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     
+    fun skipTransition() {
+        timerService?.let { service ->
+            val intent = android.content.Intent(getApplication(), TimerService::class.java).apply {
+                action = TimerService.ACTION_SKIP_TRANSITION
+            }
+            getApplication<Application>().startService(intent)
+        }
+    }
+    
     fun stopAlarm() {
         timerService?.let { service ->
             val intent = android.content.Intent(getApplication(), TimerService::class.java).apply {
@@ -189,18 +200,24 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     
     fun completeCurrentTaskEarly() {
         _currentTask.value?.let { task ->
-            markTaskCompleted(task)
-            nextTask()
+            viewModelScope.launch {
+                markTaskCompleted(task)
+                // Small delay to ensure the task list is updated
+                kotlinx.coroutines.delay(100)
+                moveToNextTask()
+            }
         }
     }
     
     private fun moveToNextTask() {
-        val currentTaskId = _currentTask.value?.id
-        val incompleteTasks = _tasks.value.filter { it.id != currentTaskId }
+        val incompleteTasks = _tasks.value
         
-        if (incompleteTasks.isNotEmpty()) {
-            _currentTask.value = incompleteTasks.first()
-            // Start the next task automatically
+        // Get the first incomplete task (which will be the next one in order)
+        val nextTask = incompleteTasks.firstOrNull()
+        
+        if (nextTask != null) {
+            _currentTask.value = nextTask
+            // Start the next task automatically with its correct duration
             startCurrentTask()
         } else {
             // No more tasks, stop the timer

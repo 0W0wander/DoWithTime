@@ -48,6 +48,7 @@ class TimerService : Service() {
         const val ACTION_STOP = "STOP"
         const val ACTION_RESET = "RESET"
         const val ACTION_NEXT_TASK = "NEXT_TASK"
+        const val ACTION_SKIP_TRANSITION = "SKIP_TRANSITION"
         const val ACTION_STOP_ALARM = "STOP_ALARM"
     }
     
@@ -71,12 +72,18 @@ class TimerService : Service() {
             ACTION_STOP -> stopTimer()
             ACTION_RESET -> resetTimer()
             ACTION_NEXT_TASK -> nextTask()
+            ACTION_SKIP_TRANSITION -> skipTransition()
             ACTION_STOP_ALARM -> stopAlarm()
         }
         return START_NOT_STICKY
     }
     
     fun startTask(task: Task) {
+        // Stop any existing timer first
+        countDownTimer?.cancel()
+        _isRunning.value = false
+        _isPaused.value = false
+        
         _currentTask.value = task
         _timeRemaining.value = task.durationSeconds * 1000L
         _showAlarm.value = false
@@ -86,7 +93,8 @@ class TimerService : Service() {
     }
     
     private fun startTimer() {
-        if (_isRunning.value) return
+        // Cancel any existing timer first
+        countDownTimer?.cancel()
         
         _isRunning.value = true
         _isPaused.value = false
@@ -153,7 +161,19 @@ class TimerService : Service() {
     
     private fun nextTask() {
         stopAlarm()
-        startTransition()
+        if (_isTransitioning.value) {
+            // If already transitioning, skip the transition entirely
+            skipTransition()
+        } else {
+            startTransition()
+        }
+    }
+    
+    private fun skipTransition() {
+        transitionTimer?.cancel()
+        _isTransitioning.value = false
+        // The ViewModel will handle moving to the next task
+        updateNotification()
     }
     
     private fun startTransition() {
@@ -249,6 +269,13 @@ class TimerService : Service() {
             this, 4, nextTaskIntent, PendingIntent.FLAG_IMMUTABLE
         )
         
+        val skipTransitionIntent = Intent(this, TimerService::class.java).apply {
+            action = ACTION_SKIP_TRANSITION
+        }
+        val skipTransitionPendingIntent = PendingIntent.getService(
+            this, 6, skipTransitionIntent, PendingIntent.FLAG_IMMUTABLE
+        )
+        
         val stopAlarmIntent = Intent(this, TimerService::class.java).apply {
             action = ACTION_STOP_ALARM
         }
@@ -270,6 +297,7 @@ class TimerService : Service() {
             }
             _isTransitioning.value -> {
                 builder.addAction(R.drawable.ic_launcher_foreground, "Stop", stopPendingIntent)
+                    .addAction(R.drawable.ic_launcher_foreground, "Skip", skipTransitionPendingIntent)
             }
             else -> {
                 builder.addAction(

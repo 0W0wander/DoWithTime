@@ -1,6 +1,7 @@
 package com.example.dowithtime.ui.screens
 
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
@@ -8,12 +9,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.dowithtime.R
 import com.example.dowithtime.viewmodel.TaskViewModel
+import kotlinx.coroutines.delay
 
 @Composable
 fun DoScreen(
@@ -27,6 +30,10 @@ fun DoScreen(
     val showAlarm by viewModel.showAlarm.collectAsState()
     val isTransitioning by viewModel.isTransitioning.collectAsState()
     val transitionTime by viewModel.transitionTime.collectAsState()
+    
+    // Double-click detection for skipping transition
+    var lastClickTime by remember { mutableStateOf(0L) }
+    val doubleClickThreshold = 300L // milliseconds
     
     // Refresh current task when screen is displayed
     LaunchedEffect(Unit) {
@@ -126,29 +133,51 @@ fun DoScreen(
         // Timer display
         if (currentTask != null) {
             if (isTransitioning) {
-                // Show transition countdown
-                Text(
-                    text = "Next task in",
-                    fontSize = 16.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                
-                Spacer(modifier = Modifier.height(8.dp))
-                
-                Text(
-                    text = "${transitionTime}s",
-                    fontSize = 48.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                
-                Spacer(modifier = Modifier.height(8.dp))
-                
-                Text(
-                    text = "Preparing next task...",
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                // Show transition countdown with double-click to skip
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .clickable {
+                            val currentTime = System.currentTimeMillis()
+                            if (currentTime - lastClickTime < doubleClickThreshold) {
+                                // Double click detected - skip transition
+                                viewModel.skipTransition()
+                            }
+                            lastClickTime = currentTime
+                        }
+                ) {
+                    Text(
+                        text = "Next task in",
+                        fontSize = 16.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Text(
+                        text = "${transitionTime}s",
+                        fontSize = 48.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Text(
+                        text = "Preparing next task...",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    
+                    Spacer(modifier = Modifier.height(8.dp))
+                    
+                    Text(
+                        text = "Double-tap to skip",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             } else {
                 // Show normal timer
                 val minutes = (timeRemaining / 1000) / 60
@@ -184,6 +213,7 @@ fun DoScreen(
                     if (isRunning) {
                         viewModel.pauseTimer()
                     } else {
+                        // Always start the current task, which will reset the timer to the correct duration
                         viewModel.startCurrentTask()
                     }
                 },
