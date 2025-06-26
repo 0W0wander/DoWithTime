@@ -57,15 +57,22 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     
-    fun addTask(title: String, durationSeconds: Int) {
+    fun addTask(title: String, durationSeconds: Int, isDaily: Boolean = false) {
         viewModelScope.launch {
             val newOrder = _tasks.value.size
             val task = Task(
                 title = title,
                 durationSeconds = durationSeconds,
-                order = newOrder
+                order = newOrder,
+                isDaily = isDaily
             )
             repository.insertTask(task)
+        }
+    }
+    
+    fun updateTask(task: Task) {
+        viewModelScope.launch {
+            repository.updateTask(task)
         }
     }
     

@@ -34,92 +34,107 @@ fun TodoListScreen(
 ) {
     val tasks by viewModel.tasks.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
+    var showEditDialog by remember { mutableStateOf(false) }
+    var editingTask by remember { mutableStateOf<Task?>(null) }
     var draggedItem by remember { mutableStateOf<Task?>(null) }
     var draggedItemIndex by remember { mutableStateOf(-1) }
     
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
+    Box(
+        modifier = Modifier.fillMaxSize()
     ) {
-        // Header
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(16.dp)
+                .padding(bottom = 80.dp) // Add padding for the floating button
         ) {
-            Text(
-                text = "Tasks",
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold
-            )
-            
-            Button(
-                onClick = { showAddDialog = true }
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Add Task")
-                Spacer(modifier = Modifier.width(4.dp))
-                Text("Add Task")
-            }
-        }
-        
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        // Task list
-        if (tasks.isEmpty()) {
-            Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
+            // Header
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "No tasks yet.\nAdd your first task to get started!",
-                    fontSize = 16.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    text = "Tasks",
+                    fontSize = 24.sp,
+                    fontWeight = FontWeight.Bold
                 )
+                
+                Button(
+                    onClick = { showAddDialog = true }
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Add Task")
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("Add Task")
+                }
             }
-        } else {
-            val listState = rememberLazyListState()
             
-            LazyColumn(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                state = listState
-            ) {
-                itemsIndexed(
-                    items = tasks,
-                    key = { _, task -> task.id }
-                ) { index, task ->
-                    DraggableTaskItem(
-                        task = task,
-                        index = index,
-                        tasks = tasks,
-                        isDragging = draggedItem?.id == task.id,
-                        onDelete = { viewModel.deleteTask(task) },
-                        onComplete = { viewModel.markTaskCompleted(task) },
-                        onDragStart = { 
-                            draggedItem = task
-                            draggedItemIndex = index
-                        },
-                        onDragEnd = { 
-                            draggedItem = null
-                            draggedItemIndex = -1
-                        },
-                        onMove = { fromIndex, toIndex ->
-                            viewModel.reorderTasks(fromIndex, toIndex)
-                        }
+            Spacer(modifier = Modifier.height(16.dp))
+            
+            // Task list
+            if (tasks.isEmpty()) {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "No tasks yet.\nAdd your first task to get started!",
+                        fontSize = 16.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+                }
+            } else {
+                val listState = rememberLazyListState()
+                
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    state = listState
+                ) {
+                    itemsIndexed(
+                        items = tasks,
+                        key = { _, task -> task.id }
+                    ) { index, task ->
+                        DraggableTaskItem(
+                            task = task,
+                            index = index,
+                            tasks = tasks,
+                            isDragging = draggedItem?.id == task.id,
+                            onDelete = { viewModel.deleteTask(task) },
+                            onComplete = { viewModel.markTaskCompleted(task) },
+                            onEdit = { 
+                                editingTask = task
+                                showEditDialog = true
+                            },
+                            onDragStart = { 
+                                draggedItem = task
+                                draggedItemIndex = index
+                            },
+                            onDragEnd = { 
+                                draggedItem = null
+                                draggedItemIndex = -1
+                            },
+                            onMove = { fromIndex, toIndex ->
+                                viewModel.reorderTasks(fromIndex, toIndex)
+                            }
+                        )
+                    }
                 }
             }
         }
         
-        Spacer(modifier = Modifier.height(16.dp))
-        
-        // Start button
+        // Fixed Start Tasks button at bottom
         if (tasks.isNotEmpty()) {
             Button(
                 onClick = onNavigateToDo,
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .padding(16.dp)
+                    .fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = MaterialTheme.colorScheme.primary
+                ),
+                elevation = ButtonDefaults.buttonElevation(
+                    defaultElevation = 8.dp
                 )
             ) {
                 Text(
@@ -135,9 +150,29 @@ fun TodoListScreen(
     if (showAddDialog) {
         AddTaskDialog(
             onDismiss = { showAddDialog = false },
-            onAddTask = { title, durationSeconds ->
-                viewModel.addTask(title, durationSeconds)
+            onAddTask = { title, durationSeconds, isDaily ->
+                viewModel.addTask(title, durationSeconds, isDaily)
                 showAddDialog = false
+            }
+        )
+    }
+    
+    // Edit task dialog
+    if (showEditDialog && editingTask != null) {
+        EditTaskDialog(
+            task = editingTask!!,
+            onDismiss = { 
+                showEditDialog = false
+                editingTask = null
+            },
+            onEditTask = { title, durationSeconds, isDaily ->
+                viewModel.updateTask(editingTask!!.copy(
+                    title = title,
+                    durationSeconds = durationSeconds,
+                    isDaily = isDaily
+                ))
+                showEditDialog = false
+                editingTask = null
             }
         )
     }
@@ -214,6 +249,7 @@ fun DraggableTaskItem(
     isDragging: Boolean,
     onDelete: () -> Unit,
     onComplete: () -> Unit,
+    onEdit: () -> Unit,
     onDragStart: () -> Unit,
     onDragEnd: () -> Unit,
     onMove: (Int, Int) -> Unit
@@ -225,6 +261,7 @@ fun DraggableTaskItem(
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .clickable { onEdit() }
             .graphicsLayer {
                 translationY = dragOffset
                 alpha = if (isDragging || isBeingDragged) 0.8f else 1f
@@ -275,24 +312,14 @@ fun DraggableTaskItem(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Drag handle
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = "${index + 1}",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Icon(
-                    Icons.Default.MoreVert,
-                    contentDescription = "Drag to reorder",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(24.dp)
-                )
-            }
+            // Order number
+            Text(
+                text = "${index + 1}",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(end = 16.dp)
+            )
             
             Column(
                 modifier = Modifier
@@ -309,6 +336,14 @@ fun DraggableTaskItem(
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (task.isDaily) {
+                    Text(
+                        text = "Daily Task",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
             }
             
             Row {
@@ -351,13 +386,14 @@ private fun formatDuration(durationSeconds: Int): String {
 @Composable
 fun AddTaskDialog(
     onDismiss: () -> Unit,
-    onAddTask: (String, Int) -> Unit
+    onAddTask: (String, Int, Boolean) -> Unit
 ) {
     var title by remember { mutableStateOf("") }
     var minutes by remember { mutableStateOf("") }
     var seconds by remember { mutableStateOf("") }
     var titleError by remember { mutableStateOf(false) }
     var durationError by remember { mutableStateOf(false) }
+    var isDaily by remember { mutableStateOf(false) }
     
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -414,6 +450,23 @@ fun AddTaskDialog(
                     )
                 }
                 
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(
+                        checked = isDaily,
+                        onCheckedChange = { isDaily = it }
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Make this a daily task",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                
                 if (durationError) {
                     Text(
                         text = "Please enter a valid duration (at least 1 second)",
@@ -441,10 +494,137 @@ fun AddTaskDialog(
                         return@Button
                     }
                     
-                    onAddTask(title, totalSeconds)
+                    onAddTask(title, totalSeconds, isDaily)
                 }
             ) {
                 Text("Add")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun EditTaskDialog(
+    task: Task,
+    onDismiss: () -> Unit,
+    onEditTask: (String, Int, Boolean) -> Unit
+) {
+    var title by remember { mutableStateOf(task.title) }
+    var minutes by remember { mutableStateOf((task.durationSeconds / 60).toString()) }
+    var seconds by remember { mutableStateOf((task.durationSeconds % 60).toString()) }
+    var titleError by remember { mutableStateOf(false) }
+    var durationError by remember { mutableStateOf(false) }
+    var isDaily by remember { mutableStateOf(task.isDaily) }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Edit Task") },
+        text = {
+            Column {
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { 
+                        title = it
+                        titleError = false
+                    },
+                    label = { Text("Task Title") },
+                    isError = titleError,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Text(
+                    text = "Duration",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+                
+                Spacer(modifier = Modifier.height(8.dp))
+                
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    OutlinedTextField(
+                        value = minutes,
+                        onValueChange = { 
+                            minutes = it.filter { char -> char.isDigit() }
+                            durationError = false
+                        },
+                        label = { Text("Minutes") },
+                        isError = durationError,
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                    
+                    OutlinedTextField(
+                        value = seconds,
+                        onValueChange = { 
+                            seconds = it.filter { char -> char.isDigit() }
+                            durationError = false
+                        },
+                        label = { Text("Seconds") },
+                        isError = durationError,
+                        modifier = Modifier.weight(1f),
+                        singleLine = true
+                    )
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Checkbox(
+                        checked = isDaily,
+                        onCheckedChange = { isDaily = it }
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "Make this a daily task",
+                        fontSize = 14.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+                
+                if (durationError) {
+                    Text(
+                        text = "Please enter a valid duration (at least 1 second)",
+                        color = MaterialTheme.colorScheme.error,
+                        fontSize = 12.sp,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (title.isBlank()) {
+                        titleError = true
+                        return@Button
+                    }
+                    
+                    val minutesInt = minutes.toIntOrNull() ?: 0
+                    val secondsInt = seconds.toIntOrNull() ?: 0
+                    val totalSeconds = minutesInt * 60 + secondsInt
+                    
+                    if (totalSeconds <= 0) {
+                        durationError = true
+                        return@Button
+                    }
+                    
+                    onEditTask(title, totalSeconds, isDaily)
+                }
+            ) {
+                Text("Save")
             }
         },
         dismissButton = {

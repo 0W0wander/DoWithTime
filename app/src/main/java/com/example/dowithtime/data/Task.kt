@@ -10,5 +10,6 @@ data class Task(
     val title: String,
     val durationSeconds: Int,
     val isCompleted: Boolean = false,
-    val order: Int = 0
+    val order: Int = 0,
+    val isDaily: Boolean = false
 ) 
