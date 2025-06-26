@@ -152,7 +152,6 @@ fun TodoListScreen(
             onDismiss = { showAddDialog = false },
             onAddTask = { title, durationSeconds, isDaily ->
                 viewModel.addTask(title, durationSeconds, isDaily)
-                showAddDialog = false
             }
         )
     }
@@ -395,6 +394,15 @@ fun AddTaskDialog(
     var durationError by remember { mutableStateOf(false) }
     var isDaily by remember { mutableStateOf(false) }
     
+    fun clearForm() {
+        title = ""
+        minutes = ""
+        seconds = ""
+        titleError = false
+        durationError = false
+        isDaily = false
+    }
+    
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Add New Task") },
@@ -495,6 +503,7 @@ fun AddTaskDialog(
                     }
                     
                     onAddTask(title, totalSeconds, isDaily)
+                    clearForm() // Clear the form for the next task
                 }
             ) {
                 Text("Add")
@@ -502,7 +511,7 @@ fun AddTaskDialog(
         },
         dismissButton = {
             TextButton(onClick = onDismiss) {
-                Text("Cancel")
+                Text("Done")
             }
         }
     )
