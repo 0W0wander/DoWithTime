@@ -31,6 +31,9 @@ import com.example.dowithtime.data.Task
 import com.example.dowithtime.viewmodel.TaskViewModel
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -585,14 +588,45 @@ fun EditTaskDialog(
     onDismiss: () -> Unit,
     onEditTask: (String, Int, Boolean, Int) -> Unit
 ) {
-    var title by remember { mutableStateOf(task.title) }
-    var minutes by remember { mutableStateOf((task.durationSeconds / 60).toString()) }
-    var seconds by remember { mutableStateOf((task.durationSeconds % 60).toString()) }
-    var order by remember { mutableStateOf((currentPosition + 1).toString()) }
+    var title by remember { mutableStateOf(TextFieldValue(task.title)) }
+    var minutes by remember { mutableStateOf(TextFieldValue((task.durationSeconds / 60).toString())) }
+    var seconds by remember { mutableStateOf(TextFieldValue((task.durationSeconds % 60).toString())) }
+    var order by remember { mutableStateOf(TextFieldValue((currentPosition + 1).toString())) }
     var titleError by remember { mutableStateOf(false) }
     var durationError by remember { mutableStateOf(false) }
     var orderError by remember { mutableStateOf(false) }
     var isDaily by remember { mutableStateOf(task.isDaily) }
+    
+    // Focus state tracking
+    var titleFocused by remember { mutableStateOf(false) }
+    var minutesFocused by remember { mutableStateOf(false) }
+    var secondsFocused by remember { mutableStateOf(false) }
+    var orderFocused by remember { mutableStateOf(false) }
+    
+    // Auto-select text when focused
+    LaunchedEffect(titleFocused) {
+        if (titleFocused) {
+            title = title.copy(selection = TextRange(0, title.text.length))
+        }
+    }
+    
+    LaunchedEffect(minutesFocused) {
+        if (minutesFocused) {
+            minutes = minutes.copy(selection = TextRange(0, minutes.text.length))
+        }
+    }
+    
+    LaunchedEffect(secondsFocused) {
+        if (secondsFocused) {
+            seconds = seconds.copy(selection = TextRange(0, seconds.text.length))
+        }
+    }
+    
+    LaunchedEffect(orderFocused) {
+        if (orderFocused) {
+            order = order.copy(selection = TextRange(0, order.text.length))
+        }
+    }
     
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -607,7 +641,9 @@ fun EditTaskDialog(
                     },
                     label = { Text("Task Title") },
                     isError = titleError,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onFocusChanged { titleFocused = it.isFocused }
                 )
                 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -627,24 +663,28 @@ fun EditTaskDialog(
                     OutlinedTextField(
                         value = minutes,
                         onValueChange = { 
-                            minutes = it.filter { char -> char.isDigit() }
+                            minutes = it.copy(text = it.text.filter { char -> char.isDigit() })
                             durationError = false
                         },
                         label = { Text("Minutes") },
                         isError = durationError,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .onFocusChanged { minutesFocused = it.isFocused },
                         singleLine = true
                     )
                     
                     OutlinedTextField(
                         value = seconds,
                         onValueChange = { 
-                            seconds = it.filter { char -> char.isDigit() }
+                            seconds = it.copy(text = it.text.filter { char -> char.isDigit() })
                             durationError = false
                         },
                         label = { Text("Seconds") },
                         isError = durationError,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier
+                            .weight(1f)
+                            .onFocusChanged { secondsFocused = it.isFocused },
                         singleLine = true
                     )
                 }
@@ -654,12 +694,14 @@ fun EditTaskDialog(
                 OutlinedTextField(
                     value = order,
                     onValueChange = { 
-                        order = it.filter { char -> char.isDigit() }
+                        order = it.copy(text = it.text.filter { char -> char.isDigit() })
                         orderError = false
                     },
                     label = { Text("Position (1, 2, 3, etc.)") },
                     isError = orderError,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .onFocusChanged { orderFocused = it.isFocused },
                     singleLine = true
                 )
                 
@@ -702,13 +744,13 @@ fun EditTaskDialog(
         confirmButton = {
             Button(
                 onClick = {
-                    if (title.isBlank()) {
+                    if (title.text.isBlank()) {
                         titleError = true
                         return@Button
                     }
                     
-                    val minutesInt = minutes.toIntOrNull() ?: 0
-                    val secondsInt = seconds.toIntOrNull() ?: 0
+                    val minutesInt = minutes.text.toIntOrNull() ?: 0
+                    val secondsInt = seconds.text.toIntOrNull() ?: 0
                     val totalSeconds = minutesInt * 60 + secondsInt
                     
                     if (totalSeconds <= 0) {
@@ -716,13 +758,13 @@ fun EditTaskDialog(
                         return@Button
                     }
                     
-                    val orderInt = order.toIntOrNull() ?: 0
+                    val orderInt = order.text.toIntOrNull() ?: 0
                     if (orderInt <= 0) {
                         orderError = true
                         return@Button
                     }
                     
-                    onEditTask(title, totalSeconds, isDaily, orderInt - 1) // Convert to 0-based index
+                    onEditTask(title.text, totalSeconds, isDaily, orderInt - 1) // Convert to 0-based index
                 }
             ) {
                 Text("Save")
