@@ -52,6 +52,7 @@ fun TodoListScreen(
     // Drag state
     var draggedItemId by remember { mutableStateOf<Int?>(null) }
     var dragOffset by remember { mutableStateOf(0f) }
+    var hoveredIndex by remember { mutableStateOf<Int?>(null) }
     
     Box(
         modifier = Modifier.fillMaxSize()
@@ -119,6 +120,7 @@ fun TodoListScreen(
                             totalTasks = tasks.size,
                             isDragging = draggedItemId == task.id,
                             dragOffset = if (draggedItemId == task.id) dragOffset else 0f,
+                            isHovered = hoveredIndex == index,
                             onDelete = { viewModel.deleteTask(task) },
                             onComplete = { viewModel.markTaskCompleted(task) },
                             onEdit = { 
@@ -135,6 +137,7 @@ fun TodoListScreen(
                                 println("Start offset: $offset")
                                 draggedItemId = task.id
                                 dragOffset = 0f
+                                hoveredIndex = null
                             },
                             onDragEnd = { 
                                 val actualIndex = tasks.indexOfFirst { it.id == task.id }
@@ -143,16 +146,18 @@ fun TodoListScreen(
                                 println("Actual index: $actualIndex")
                                 draggedItemId?.let { fromId ->
                                     // Calculate target position based on final drag offset
-                                    // Use a simple threshold - if dragged more than 30 pixels, move
-                                    val threshold = 30f
+                                    // Use actual task height as threshold (based on measurements)
+                                    val threshold = 220f // Pixels needed to move one position
                                     val targetIndex = when {
                                         dragOffset > threshold -> {
-                                            // Dragging down - move to next position
-                                            (actualIndex + 1).coerceAtMost(tasks.size - 1)
+                                            // Calculate how many positions to move down
+                                            val positionsDown = (dragOffset / threshold).toInt()
+                                            (actualIndex + positionsDown).coerceAtMost(tasks.size - 1)
                                         }
                                         dragOffset < -threshold -> {
-                                            // Dragging up - move to previous position
-                                            (actualIndex - 1).coerceAtLeast(0)
+                                            // Calculate how many positions to move up
+                                            val positionsUp = (-dragOffset / threshold).toInt()
+                                            (actualIndex - positionsUp).coerceAtLeast(0)
                                         }
                                         else -> {
                                             // Not dragged far enough - stay in same position
@@ -172,12 +177,31 @@ fun TodoListScreen(
                                 }
                                 draggedItemId = null
                                 dragOffset = 0f
+                                hoveredIndex = null
                                 println("=== DRAG END COMPLETE ===")
                             },
                             onDrag = { change, dragAmount ->
                                 if (draggedItemId == task.id) {
                                     dragOffset += dragAmount.y
                                     println("Drag update: offset = $dragOffset, amount = $dragAmount")
+                                    
+                                    // Calculate which task we're hovering over
+                                    val threshold = 220f // Pixels needed to move one position
+                                    val actualIndex = tasks.indexOfFirst { it.id == task.id }
+                                    val targetIndex = when {
+                                        dragOffset > threshold -> {
+                                            // Calculate how many positions to move down
+                                            val positionsDown = (dragOffset / threshold).toInt()
+                                            (actualIndex + positionsDown).coerceAtMost(tasks.size - 1)
+                                        }
+                                        dragOffset < -threshold -> {
+                                            // Calculate how many positions to move up
+                                            val positionsUp = (-dragOffset / threshold).toInt()
+                                            (actualIndex - positionsUp).coerceAtLeast(0)
+                                        }
+                                        else -> actualIndex
+                                    }
+                                    hoveredIndex = if (targetIndex != actualIndex) targetIndex else null
                                 }
                             }
                         )
@@ -254,6 +278,7 @@ fun TaskItem(
     totalTasks: Int,
     isDragging: Boolean,
     dragOffset: Float,
+    isHovered: Boolean,
     onDelete: () -> Unit,
     onComplete: () -> Unit,
     onEdit: () -> Unit,
@@ -265,7 +290,11 @@ fun TaskItem(
         modifier = Modifier
             .fillMaxWidth()
             .graphicsLayer {
-                translationY = if (isDragging) dragOffset else 0f
+                translationY = when {
+                    isDragging -> dragOffset
+                    isHovered -> 20f // Move down when hovered
+                    else -> 0f
+                }
                 alpha = if (isDragging) 0.8f else 1f
                 scaleX = if (isDragging) 1.05f else 1f
                 scaleY = if (isDragging) 1.05f else 1f
@@ -279,10 +308,14 @@ fun TaskItem(
             }
             .clickable { onEdit() },
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
+            containerColor = if (isHovered) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
         ),
         elevation = CardDefaults.cardElevation(
-            defaultElevation = if (isDragging) 8.dp else 2.dp
+            defaultElevation = when {
+                isDragging -> 8.dp
+                isHovered -> 4.dp
+                else -> 2.dp
+            }
         )
     ) {
         Row(
