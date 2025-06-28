@@ -183,6 +183,9 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     }
     
     fun startCurrentTask() {
+        // First refresh the current task to ensure we have the first task
+        refreshCurrentTask()
+        
         _currentTask.value?.let { task ->
             // Immediately set the time remaining to the current task's duration
             _timeRemaining.value = task.durationSeconds * 1000L

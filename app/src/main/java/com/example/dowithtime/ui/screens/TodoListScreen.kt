@@ -120,7 +120,12 @@ fun TodoListScreen(
         // Fixed Start Tasks button at bottom
         if (tasks.isNotEmpty()) {
             Button(
-                onClick = onNavigateToDo,
+                onClick = {
+                    // Start the timer for the first task automatically
+                    viewModel.startCurrentTask()
+                    // Then navigate to the Do screen
+                    onNavigateToDo()
+                },
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .padding(16.dp)
