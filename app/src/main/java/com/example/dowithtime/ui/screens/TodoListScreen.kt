@@ -7,6 +7,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -20,11 +22,14 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.ui.zIndex
 import com.example.dowithtime.data.Task
 import com.example.dowithtime.viewmodel.TaskViewModel
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -88,7 +93,8 @@ fun TodoListScreen(
                 LazyColumn(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .weight(1f), // Take up remaining space
+                        .weight(1f)
+                        .padding(bottom = 80.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     state = listState
                 ) {
@@ -243,6 +249,16 @@ fun AddTaskDialog(
     var durationError by remember { mutableStateOf(false) }
     var isDaily by remember { mutableStateOf(false) }
     
+    // Focus management
+    val titleFocusRequester = remember { FocusRequester() }
+    val minutesFocusRequester = remember { FocusRequester() }
+    val secondsFocusRequester = remember { FocusRequester() }
+    
+    // Auto-focus title field when dialog opens
+    LaunchedEffect(Unit) {
+        titleFocusRequester.requestFocus()
+    }
+    
     fun clearForm() {
         title = ""
         minutes = ""
@@ -250,6 +266,8 @@ fun AddTaskDialog(
         titleError = false
         durationError = false
         isDaily = false
+        // Re-focus title field after clearing
+        titleFocusRequester.requestFocus()
     }
     
     AlertDialog(
@@ -265,7 +283,16 @@ fun AddTaskDialog(
                     },
                     label = { Text("Task Title") },
                     isError = titleError,
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(titleFocusRequester),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(
+                        imeAction = ImeAction.Next
+                    ),
+                    keyboardActions = KeyboardActions(
+                        onNext = { minutesFocusRequester.requestFocus() }
+                    )
                 )
                 
                 Spacer(modifier = Modifier.height(16.dp))
@@ -290,8 +317,17 @@ fun AddTaskDialog(
                         },
                         label = { Text("Minutes") },
                         isError = durationError,
-                        modifier = Modifier.weight(1f),
-                        singleLine = true
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(minutesFocusRequester),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            imeAction = ImeAction.Next,
+                            keyboardType = KeyboardType.Number
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onNext = { secondsFocusRequester.requestFocus() }
+                        )
                     )
                     
                     OutlinedTextField(
@@ -302,8 +338,34 @@ fun AddTaskDialog(
                         },
                         label = { Text("Seconds") },
                         isError = durationError,
-                        modifier = Modifier.weight(1f),
-                        singleLine = true
+                        modifier = Modifier
+                            .weight(1f)
+                            .focusRequester(secondsFocusRequester),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(
+                            imeAction = ImeAction.Done,
+                            keyboardType = KeyboardType.Number
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onDone = {
+                                // Validate and add task when Enter is pressed in seconds field
+                                if (title.isNotBlank()) {
+                                    val minutesInt = minutes.toIntOrNull() ?: 0
+                                    val secondsInt = seconds.toIntOrNull() ?: 0
+                                    val totalSeconds = minutesInt * 60 + secondsInt
+                                    
+                                    if (totalSeconds > 0) {
+                                        onAddTask(title, totalSeconds, isDaily)
+                                        clearForm()
+                                    } else {
+                                        durationError = true
+                                    }
+                                } else {
+                                    titleError = true
+                                    titleFocusRequester.requestFocus()
+                                }
+                            }
+                        )
                     )
                 }
                 
@@ -352,7 +414,7 @@ fun AddTaskDialog(
                     }
                     
                     onAddTask(title, totalSeconds, isDaily)
-                    clearForm() // Clear the form for the next task
+                    clearForm() // Clear the form and re-focus title field
                 }
             ) {
                 Text("Add")
