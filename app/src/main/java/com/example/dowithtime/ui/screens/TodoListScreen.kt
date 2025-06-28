@@ -41,6 +41,7 @@ fun TodoListScreen(
     var showAddDialog by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
     var editingTask by remember { mutableStateOf<Task?>(null) }
+    var editingTaskPosition by remember { mutableStateOf(0) }
     
     Box(
         modifier = Modifier.fillMaxSize()
@@ -109,6 +110,7 @@ fun TodoListScreen(
                             onComplete = { viewModel.markTaskCompleted(task) },
                             onEdit = { 
                                 editingTask = task
+                                editingTaskPosition = index
                                 showEditDialog = true
                             }
                         )
@@ -160,6 +162,7 @@ fun TodoListScreen(
     if (showEditDialog && editingTask != null) {
         EditTaskDialog(
             task = editingTask!!,
+            currentPosition = editingTaskPosition,
             onDismiss = { 
                 showEditDialog = false
                 editingTask = null
@@ -437,13 +440,14 @@ fun AddTaskDialog(
 @Composable
 fun EditTaskDialog(
     task: Task,
+    currentPosition: Int,
     onDismiss: () -> Unit,
     onEditTask: (String, Int, Boolean, Int) -> Unit
 ) {
     var title by remember { mutableStateOf(task.title) }
     var minutes by remember { mutableStateOf((task.durationSeconds / 60).toString()) }
     var seconds by remember { mutableStateOf((task.durationSeconds % 60).toString()) }
-    var order by remember { mutableStateOf((task.order + 1).toString()) }
+    var order by remember { mutableStateOf((currentPosition + 1).toString()) }
     var titleError by remember { mutableStateOf(false) }
     var durationError by remember { mutableStateOf(false) }
     var orderError by remember { mutableStateOf(false) }
