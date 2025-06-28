@@ -76,6 +76,27 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     
+    fun updateTaskWithOrder(task: Task, newOrder: Int) {
+        viewModelScope.launch {
+            val currentTasks = _tasks.value.toMutableList()
+            val currentIndex = currentTasks.indexOfFirst { it.id == task.id }
+            
+            if (currentIndex != -1) {
+                // Remove the task from its current position
+                currentTasks.removeAt(currentIndex)
+                
+                // Insert it at the new position
+                val insertIndex = newOrder.coerceIn(0, currentTasks.size)
+                currentTasks.add(insertIndex, task.copy(order = newOrder))
+                
+                // Update all task orders to be sequential
+                currentTasks.forEachIndexed { index, t ->
+                    repository.updateTaskOrder(t.id, index)
+                }
+            }
+        }
+    }
+    
     fun deleteTask(task: Task) {
         viewModelScope.launch {
             repository.deleteTask(task)
