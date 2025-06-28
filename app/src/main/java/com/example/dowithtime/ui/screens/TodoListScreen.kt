@@ -186,17 +186,19 @@ fun TodoListScreen(
                                     println("Drag update: offset = $dragOffset, amount = $dragAmount")
                                     
                                     // Calculate which task we're hovering over
-                                    val threshold = 220f // Pixels needed to move one position
+                                    // Use a smaller threshold for hover detection to make it more sensitive
+                                    val hoverThreshold = 110f // Half the task height for easier hover detection
+                                    val positionThreshold = 220f // Full task height for accurate position calculation
                                     val actualIndex = tasks.indexOfFirst { it.id == task.id }
                                     val targetIndex = when {
-                                        dragOffset > threshold -> {
-                                            // Calculate how many positions to move down
-                                            val positionsDown = (dragOffset / threshold).toInt()
+                                        dragOffset > hoverThreshold -> {
+                                            // Calculate how many positions to move down using the correct threshold
+                                            val positionsDown = (dragOffset / positionThreshold).toInt()
                                             (actualIndex + positionsDown).coerceAtMost(tasks.size - 1)
                                         }
-                                        dragOffset < -threshold -> {
-                                            // Calculate how many positions to move up
-                                            val positionsUp = (-dragOffset / threshold).toInt()
+                                        dragOffset < -hoverThreshold -> {
+                                            // Calculate how many positions to move up using the correct threshold
+                                            val positionsUp = (-dragOffset / positionThreshold).toInt()
                                             (actualIndex - positionsUp).coerceAtLeast(0)
                                         }
                                         else -> actualIndex
