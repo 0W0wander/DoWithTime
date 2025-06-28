@@ -47,11 +47,6 @@ fun TodoListScreen(
     var editingTask by remember { mutableStateOf<Task?>(null) }
     var editingTaskPosition by remember { mutableStateOf(0) }
     
-    // Debug: Log when tasks change
-    LaunchedEffect(tasks) {
-        println("UI: Tasks updated - ${tasks.mapIndexed { index, task -> "${index}:${task.title}" }}")
-    }
-    
     // Drag state
     var draggedItemId by remember { mutableStateOf<Int?>(null) }
     var dragOffset by remember { mutableStateOf(0f) }
@@ -133,20 +128,11 @@ fun TodoListScreen(
                             },
                             onDragStart = { offset ->
                                 val actualIndex = tasks.indexOfFirst { it.id == task.id }
-                                println("=== DRAG START ===")
-                                println("Task: ${task.title} (ID: ${task.id})")
-                                println("Current index: $index")
-                                println("Actual index: $actualIndex")
-                                println("Start offset: $offset")
                                 draggedItemId = task.id
                                 dragOffset = 0f
                                 hoveredIndex = null
                             },
                             onDragEnd = { 
-                                val actualIndex = tasks.indexOfFirst { it.id == task.id }
-                                println("=== DRAG END ===")
-                                println("Final drag offset: $dragOffset")
-                                println("Actual index: $actualIndex")
                                 draggedItemId?.let { fromId ->
                                     // Calculate target position based on final drag offset
                                     // Use actual task height as threshold (based on measurements)
@@ -168,28 +154,17 @@ fun TodoListScreen(
                                         }
                                     }
                                     
-                                    // Debug output
-                                    println("Drag: from index $actualIndex to target $targetIndex, offset: $dragOffset")
-                                    println("Threshold: $threshold")
-                                    println("Will reorder: ${targetIndex != actualIndex}")
-                                    
                                     if (targetIndex != actualIndex) {
-                                        println("Calling reorderTask($actualIndex, $targetIndex)")
                                         viewModel.reorderTask(actualIndex, targetIndex)
                                     }
                                 }
                                 draggedItemId = null
                                 dragOffset = 0f
                                 hoveredIndex = null
-                                println("=== DRAG END COMPLETE ===")
                             },
                             onDrag = { change, dragAmount ->
                                 if (draggedItemId == task.id) {
                                     dragOffset += dragAmount.y
-                                    println("Drag update: offset = $dragOffset, amount = $dragAmount")
-                                    
-                                    // Calculate which task we're hovering over
-                                    // Use a smaller threshold for hover detection to make it more sensitive
                                     val hoverThreshold = 110f // Half the task height for easier hover detection
                                     val positionThreshold = 220f // Full task height for accurate position calculation
                                     val actualIndex = tasks.indexOfFirst { it.id == task.id }
