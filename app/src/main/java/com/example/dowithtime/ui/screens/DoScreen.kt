@@ -17,6 +17,9 @@ import androidx.compose.ui.unit.sp
 import com.example.dowithtime.R
 import com.example.dowithtime.viewmodel.TaskViewModel
 import kotlinx.coroutines.delay
+import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 
 @Composable
 fun DoScreen(
@@ -60,222 +63,200 @@ fun DoScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp),
+            .padding(0.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         // Header
+        Spacer(modifier = Modifier.height(24.dp))
         Text(
             text = "Do",
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold
+            fontSize = 28.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.align(Alignment.CenterHorizontally)
         )
-        
-        Spacer(modifier = Modifier.height(32.dp))
-        
+        Spacer(modifier = Modifier.height(16.dp))
         // Current task info
         currentTask?.let { task ->
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = if (isTransitioning) "Next Task" else "Current Task",
-                        fontSize = 16.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    
-                    Spacer(modifier = Modifier.height(8.dp))
-                    
-                    Text(
-                        text = task.title,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                    )
-                    
-                    Spacer(modifier = Modifier.height(8.dp))
-                    
-                    Text(
-                        text = formatDuration(task.durationSeconds),
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Text(
+                    text = if (isTransitioning) "Next Task" else "Current Task",
+                    fontSize = 15.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = task.title,
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = formatDuration(task.durationSeconds),
+                    fontSize = 17.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
             }
         } ?: run {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Column(
-                    modifier = Modifier.padding(24.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                    Text(
-                        text = "No tasks available",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                    
-                    Spacer(modifier = Modifier.height(8.dp))
-                    
-                    Text(
-                        text = "Add some tasks first!",
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
+                Text(
+                    text = "No tasks available",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Medium
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = "Add some tasks first!",
+                    fontSize = 14.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
-        
         Spacer(modifier = Modifier.height(32.dp))
-        
         // Timer display
         if (currentTask != null) {
             if (isTransitioning) {
-                // Show transition countdown with double-click to skip
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
+                Box(
                     modifier = Modifier
-                        .clickable {
-                            val currentTime = System.currentTimeMillis()
-                            if (currentTime - lastClickTime < doubleClickThreshold) {
-                                // Double click detected - skip transition
-                                viewModel.skipTransition()
-                            }
-                            lastClickTime = currentTime
-                        }
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onDoubleTap = {
+                                    viewModel.skipTransition()
+                                }
+                            )
+                        },
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text(
-                        text = "Next task in",
-                        fontSize = 16.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    
-                    Spacer(modifier = Modifier.height(8.dp))
-                    
-                    Text(
-                        text = "${transitionTime}s",
-                        fontSize = 48.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
-                    
-                    Spacer(modifier = Modifier.height(8.dp))
-                    
-                    Text(
-                        text = "Preparing next task...",
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    
-                    Spacer(modifier = Modifier.height(8.dp))
-                    
-                    Text(
-                        text = "Double-tap to skip",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Medium
-                    )
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = "Next task in",
+                            fontSize = 16.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "${transitionTime}s",
+                            fontSize = 48.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Preparing next task...",
+                            fontSize = 14.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Text(
+                            text = "Double-tap to skip",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
+                return
             } else {
                 // Show normal timer
                 val minutes = (timeRemaining / 1000) / 60
                 val seconds = (timeRemaining / 1000) % 60
                 val timeText = String.format("%02d:%02d", minutes, seconds)
-                
+                Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     text = timeText,
-                    fontSize = 48.sp,
+                    fontSize = 64.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (isRunning) MaterialTheme.colorScheme.primary 
-                            else MaterialTheme.colorScheme.onSurface
+                    color = if (isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
                 )
-                
-                Spacer(modifier = Modifier.height(8.dp))
-                
-                Text(
-                    text = if (isRunning) "Time remaining" 
-                           else if (isPaused) "Paused" 
-                           else "Ready to start",
-                    fontSize = 16.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
-        
-        Spacer(modifier = Modifier.height(32.dp))
-        
-        // Big play/pause button (only show when not transitioning)
-        if (currentTask != null && !isTransitioning) {
-            Button(
-                onClick = {
-                    if (isRunning) {
-                        viewModel.pauseTimer()
-                    } else {
-                        // Always start the current task, which will reset the timer to the correct duration
-                        viewModel.startCurrentTask()
-                    }
-                },
-                modifier = Modifier
-                    .size(120.dp)
-                    .clip(CircleShape),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isRunning) MaterialTheme.colorScheme.error 
-                                   else MaterialTheme.colorScheme.primary
-                )
-            ) {
-                Image(
-                    painter = painterResource(
-                        if (isRunning) R.drawable.ic_pause else R.drawable.ic_play
-                    ),
-                    contentDescription = if (isRunning) "Pause" else "Start",
-                    modifier = Modifier.size(48.dp)
-                )
-            }
-        }
-        
-        Spacer(modifier = Modifier.height(24.dp))
-        
-        // Control buttons (only show when not transitioning)
-        if (currentTask != null && !isTransitioning) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
-                OutlinedButton(
-                    onClick = { viewModel.resetTimer() }
+                Spacer(modifier = Modifier.height(24.dp))
+                // Modern play/pause button (larger)
+                Box(
+                    modifier = Modifier
+                        .size(112.dp)
+                        .clip(CircleShape)
+                        .background(brush = com.example.dowithtime.ui.theme.TimerGradient)
+                        .clickable {
+                            if (isRunning) viewModel.pauseTimer() else viewModel.startCurrentTask()
+                        },
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text("Reset")
+                    Icon(
+                        painter = painterResource(id = if (isRunning) R.drawable.ic_pause else R.drawable.ic_play),
+                        contentDescription = if (isRunning) "Pause" else "Play",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(64.dp)
+                    )
                 }
-                
-                OutlinedButton(
-                    onClick = { viewModel.completeCurrentTaskEarly() }
+                Spacer(modifier = Modifier.height(24.dp))
+                // Modern Next Task button
+                Button(
+                    onClick = { viewModel.nextTask() },
+                    modifier = Modifier
+                        .fillMaxWidth(0.7f)
+                        .height(54.dp)
+                        .background(brush = com.example.dowithtime.ui.theme.PrimaryGradient, shape = CircleShape),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color.Transparent),
+                    elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
                 ) {
-                    Text("Next Task")
+                    Text(
+                        text = "Next Task",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                // Reset button
+                OutlinedButton(
+                    onClick = { viewModel.resetTimer() },
+                    modifier = Modifier
+                        .fillMaxWidth(0.7f)
+                        .height(44.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(),
+                    border = ButtonDefaults.outlinedButtonBorder,
+                    shape = CircleShape
+                ) {
+                    Text(
+                        text = "Reset",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium
+                    )
                 }
             }
         }
-        
         Spacer(modifier = Modifier.weight(1f))
-        
-        // Back button
+        // Back to Tasks button (more visible)
         OutlinedButton(
-            onClick = {
-                // Stop the timer before navigating back
-                viewModel.stopTimer()
-                onNavigateBack()
-            },
-            modifier = Modifier.fillMaxWidth()
+            onClick = onNavigateBack,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.primary),
+            border = ButtonDefaults.outlinedButtonBorder,
+            shape = CircleShape
         ) {
-            Text("Back to Tasks")
+            Text(
+                text = "Back to Tasks",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Medium
+            )
         }
     }
 }

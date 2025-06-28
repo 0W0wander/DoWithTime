@@ -1,5 +1,6 @@
 package com.example.dowithtime.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -13,18 +14,24 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.dowithtime.data.Task
@@ -34,6 +41,11 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import com.example.dowithtime.ui.theme.*
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.toArgb
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,49 +65,140 @@ fun TodoListScreen(
     var hoveredIndex by remember { mutableStateOf<Int?>(null) }
     
     Box(
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier
+            .fillMaxSize()
+            .background(
+                brush = Brush.verticalGradient(
+                    colors = listOf(
+                        MaterialTheme.colorScheme.background,
+                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.1f)
+                    )
+                )
+            )
     ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp)
+                .padding(8.dp)
         ) {
-            // Header
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            // Compact header
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth(),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface
+                ),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                shape = RoundedCornerShape(8.dp)
             ) {
-                Text(
-                    text = "Tasks",
-                    fontSize = 24.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                
-                Button(
-                    onClick = { showAddDialog = true }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            brush = PrimaryGradient,
+                            shape = RoundedCornerShape(8.dp)
+                        )
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
                 ) {
-                    Icon(Icons.Default.Add, contentDescription = "Add Task")
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text("Add Task")
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column {
+                            Text(
+                                text = "DoWithTime",
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "Manage your tasks",
+                                fontSize = 12.sp,
+                                color = Color.White.copy(alpha = 0.8f)
+                            )
+                        }
+                        Card(
+                            modifier = Modifier.size(28.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = Color.White.copy(alpha = 0.2f)
+                            ),
+                            shape = RoundedCornerShape(6.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = "⏱",
+                                    fontSize = 14.sp,
+                                    color = Color.White
+                                )
+                            }
+                        }
+                    }
                 }
             }
             
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
             
-            // Task list - takes up remaining space and scrolls
+            // Task list - more compact
             if (tasks.isEmpty()) {
-                Box(
+                Card(
                     modifier = Modifier
                         .fillMaxSize()
                         .weight(1f),
-                    contentAlignment = Alignment.Center
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                    shape = RoundedCornerShape(8.dp)
                 ) {
-                    Text(
-                        text = "No tasks yet.\nAdd your first task to get started!",
-                        fontSize = 16.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(16.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Card(
+                                modifier = Modifier.size(36.dp),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                                ),
+                                shape = RoundedCornerShape(8.dp),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "⏱",
+                                        fontSize = 16.sp,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "No tasks yet",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Add your first task to get started!",
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                textAlign = TextAlign.Center,
+                                lineHeight = 16.sp
+                            )
+                        }
+                    }
                 }
             } else {
                 val listState = rememberLazyListState()
@@ -104,8 +207,8 @@ fun TodoListScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f)
-                        .padding(bottom = 80.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                        .padding(bottom = 56.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                     state = listState
                 ) {
                     itemsIndexed(
@@ -134,26 +237,19 @@ fun TodoListScreen(
                             },
                             onDragEnd = { 
                                 draggedItemId?.let { fromId ->
-                                    // Calculate target position based on final drag offset
-                                    // Use actual task height as threshold (based on measurements)
-                                    val threshold = 220f // Pixels needed to move one position
+                                    val threshold = 153f // compact card height in px (measured)
+                                    val actualIndex = tasks.indexOfFirst { it.id == fromId }
                                     val targetIndex = when {
                                         dragOffset > threshold -> {
-                                            // Calculate how many positions to move down
                                             val positionsDown = (dragOffset / threshold).toInt()
                                             (actualIndex + positionsDown).coerceAtMost(tasks.size - 1)
                                         }
                                         dragOffset < -threshold -> {
-                                            // Calculate how many positions to move up
                                             val positionsUp = (-dragOffset / threshold).toInt()
                                             (actualIndex - positionsUp).coerceAtLeast(0)
                                         }
-                                        else -> {
-                                            // Not dragged far enough - stay in same position
-                                            actualIndex
-                                        }
+                                        else -> actualIndex
                                     }
-                                    
                                     if (targetIndex != actualIndex) {
                                         viewModel.reorderTask(actualIndex, targetIndex)
                                     }
@@ -165,18 +261,15 @@ fun TodoListScreen(
                             onDrag = { change, dragAmount ->
                                 if (draggedItemId == task.id) {
                                     dragOffset += dragAmount.y
-                                    val hoverThreshold = 110f // Half the task height for easier hover detection
-                                    val positionThreshold = 220f // Full task height for accurate position calculation
+                                    val threshold = 153f // compact card height in px (measured)
                                     val actualIndex = tasks.indexOfFirst { it.id == task.id }
                                     val targetIndex = when {
-                                        dragOffset > hoverThreshold -> {
-                                            // Calculate how many positions to move down using the correct threshold
-                                            val positionsDown = (dragOffset / positionThreshold).toInt()
+                                        dragOffset > threshold -> {
+                                            val positionsDown = (dragOffset / threshold).toInt()
                                             (actualIndex + positionsDown).coerceAtMost(tasks.size - 1)
                                         }
-                                        dragOffset < -hoverThreshold -> {
-                                            // Calculate how many positions to move up using the correct threshold
-                                            val positionsUp = (-dragOffset / positionThreshold).toInt()
+                                        dragOffset < -threshold -> {
+                                            val positionsUp = (-dragOffset / threshold).toInt()
                                             (actualIndex - positionsUp).coerceAtLeast(0)
                                         }
                                         else -> actualIndex
@@ -189,33 +282,67 @@ fun TodoListScreen(
                 }
             }
         }
-        
-        // Fixed Start Tasks button at bottom
+        // Compact Start Tasks button at bottom
         if (tasks.isNotEmpty()) {
-            Button(
-                onClick = {
-                    // Start the timer for the first task automatically
-                    viewModel.startCurrentTask()
-                    // Then navigate to the Do screen
-                    onNavigateToDo()
-                },
+            Card(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(16.dp)
+                    .padding(8.dp)
                     .fillMaxWidth(),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.primary
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surface
                 ),
-                elevation = ButtonDefaults.buttonElevation(
-                    defaultElevation = 8.dp
-                )
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                shape = RoundedCornerShape(8.dp)
             ) {
-                Text(
-                    text = "Start Tasks",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                )
+                Button(
+                    onClick = {
+                        viewModel.startCurrentTask()
+                        onNavigateToDo()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            brush = TimerGradient,
+                            shape = RoundedCornerShape(6.dp)
+                        )
+                        .padding(10.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = Color.Transparent
+                    ),
+                    elevation = ButtonDefaults.buttonElevation(
+                        defaultElevation = 0.dp
+                    )
+                ) {
+                    Icon(
+                        Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Start Tasks",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
             }
+        }
+        // Smaller floating action button
+        FloatingActionButton(
+            onClick = { showAddDialog = true },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(12.dp),
+            containerColor = MaterialTheme.colorScheme.primary,
+            contentColor = Color.White,
+            elevation = FloatingActionButtonDefaults.elevation(0.dp)
+        ) {
+            Icon(
+                Icons.Default.Add,
+                contentDescription = "Add Task",
+                modifier = Modifier.size(18.dp)
+            )
         }
     }
     
@@ -272,12 +399,10 @@ fun TaskItem(
             .graphicsLayer {
                 translationY = when {
                     isDragging -> dragOffset
-                    isHovered -> 20f // Move down when hovered
+                    isHovered -> 8f
                     else -> 0f
                 }
-                alpha = if (isDragging) 0.8f else 1f
-                scaleX = if (isDragging) 1.05f else 1f
-                scaleY = if (isDragging) 1.05f else 1f
+                alpha = if (isDragging) 0.5f else 1f
             }
             .pointerInput(Unit) {
                 detectDragGestures(
@@ -288,74 +413,96 @@ fun TaskItem(
             }
             .clickable { onEdit() },
         colors = CardDefaults.cardColors(
-            containerColor = if (isHovered) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface
-        ),
-        elevation = CardDefaults.cardElevation(
-            defaultElevation = when {
-                isDragging -> 8.dp
-                isHovered -> 4.dp
-                else -> 2.dp
+            containerColor = when {
+                isHovered -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)
+                else -> MaterialTheme.colorScheme.surface
             }
-        )
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        shape = RoundedCornerShape(8.dp)
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+                .padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Drag handle
-            Icon(
-                Icons.Default.MoreVert,
-                contentDescription = "Drag to reorder",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp)
-            )
-            
-            Spacer(modifier = Modifier.width(8.dp))
-            
+            // Task title and duration stacked vertically
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .clickable { onEdit() }
+                    .padding(start = 2.dp),
+                verticalArrangement = Arrangement.Center
             ) {
                 Text(
                     text = task.title,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1
                 )
-                Text(
-                    text = formatDuration(task.durationSeconds),
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                if (isDragging) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Text(
-                        text = "Drag offset: ${dragOffset.toInt()}",
+                        text = "⏱",
                         fontSize = 12.sp,
                         color = MaterialTheme.colorScheme.primary
                     )
+                    Spacer(modifier = Modifier.width(2.dp))
+                    Text(
+                        text = formatDuration(task.durationSeconds),
+                        fontSize = 13.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                if (isDragging) {
+                    Text(
+                        text = "offset: ${dragOffset.toInt()}px",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = 2.dp)
+                    )
                 }
             }
-            
-            Row {
-                Button(
-                    onClick = onComplete,
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.tertiary
-                    )
+            // Complete button
+            Button(
+                onClick = onComplete,
+                modifier = Modifier.height(32.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.tertiary
+                ),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
+            ) {
+                Text(
+                    "Complete",
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            // Trash can icon centered in a small card
+            Card(
+                modifier = Modifier
+                    .size(32.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = ErrorRed.copy(alpha = 0.12f)
+                ),
+                shape = RoundedCornerShape(8.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable { onDelete() },
+                    contentAlignment = Alignment.Center
                 ) {
-                    Text("Complete")
-                }
-                
-                Spacer(modifier = Modifier.width(8.dp))
-                
-                IconButton(onClick = onDelete) {
                     Icon(
                         Icons.Default.Delete,
                         contentDescription = "Delete",
-                        tint = MaterialTheme.colorScheme.error
+                        tint = ErrorRed,
+                        modifier = Modifier.size(18.dp)
                     )
                 }
             }
@@ -399,126 +546,200 @@ fun AddTaskDialog(
     
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add New Task") },
+        modifier = Modifier.shadow(16.dp, RoundedCornerShape(20.dp)),
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(20.dp),
+        title = { 
+            Text(
+                "Add New Task",
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        },
         text = {
-            Column {
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { 
-                        title = it
-                        titleError = false
-                    },
-                    label = { Text("Task Title") },
-                    isError = titleError,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .focusRequester(titleFocusRequester),
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(
-                        imeAction = ImeAction.Next
+            Column(
+                modifier = Modifier.padding(vertical = 8.dp)
+            ) {
+                // Task title field
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
                     ),
-                    keyboardActions = KeyboardActions(
-                        onNext = { minutesFocusRequester.requestFocus() }
+                    shape = RoundedCornerShape(12.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                ) {
+                    OutlinedTextField(
+                        value = title,
+                        onValueChange = { 
+                            title = it
+                            titleError = false
+                        },
+                        label = { Text("Task Title") },
+                        isError = titleError,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .focusRequester(titleFocusRequester),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = Color.Transparent,
+                            focusedLabelColor = MaterialTheme.colorScheme.primary
+                        ),
+                        keyboardOptions = KeyboardOptions(
+                            imeAction = ImeAction.Next
+                        ),
+                        keyboardActions = KeyboardActions(
+                            onNext = { minutesFocusRequester.requestFocus() }
+                        )
                     )
-                )
+                }
                 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(20.dp))
                 
+                // Duration section
                 Text(
                     text = "Duration",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 
-                Spacer(modifier = Modifier.height(8.dp))
+                Spacer(modifier = Modifier.height(12.dp))
                 
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    OutlinedTextField(
-                        value = minutes,
-                        onValueChange = { 
-                            minutes = it.filter { char -> char.isDigit() }
-                            durationError = false
-                        },
-                        label = { Text("Minutes") },
-                        isError = durationError,
-                        modifier = Modifier
-                            .weight(1f)
-                            .focusRequester(minutesFocusRequester),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            imeAction = ImeAction.Next,
-                            keyboardType = KeyboardType.Number
+                    // Minutes field
+                    Card(
+                        modifier = Modifier.weight(1f),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
                         ),
-                        keyboardActions = KeyboardActions(
-                            onNext = { secondsFocusRequester.requestFocus() }
+                        shape = RoundedCornerShape(12.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = minutes,
+                            onValueChange = { 
+                                minutes = it.filter { char -> char.isDigit() }
+                                durationError = false
+                            },
+                            label = { Text("Minutes") },
+                            isError = durationError,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .focusRequester(minutesFocusRequester),
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = Color.Transparent,
+                                focusedLabelColor = MaterialTheme.colorScheme.primary
+                            ),
+                            keyboardOptions = KeyboardOptions(
+                                imeAction = ImeAction.Next,
+                                keyboardType = KeyboardType.Number
+                            ),
+                            keyboardActions = KeyboardActions(
+                                onNext = { secondsFocusRequester.requestFocus() }
+                            )
                         )
-                    )
+                    }
                     
-                    OutlinedTextField(
-                        value = seconds,
-                        onValueChange = { 
-                            seconds = it.filter { char -> char.isDigit() }
-                            durationError = false
-                        },
-                        label = { Text("Seconds") },
-                        isError = durationError,
-                        modifier = Modifier
-                            .weight(1f)
-                            .focusRequester(secondsFocusRequester),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            imeAction = ImeAction.Done,
-                            keyboardType = KeyboardType.Number
+                    // Seconds field
+                    Card(
+                        modifier = Modifier.weight(1f),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
                         ),
-                        keyboardActions = KeyboardActions(
-                            onDone = {
-                                // Validate and add task when Enter is pressed in seconds field
-                                if (title.isNotBlank()) {
-                                    val minutesInt = minutes.toIntOrNull() ?: 0
-                                    val secondsInt = seconds.toIntOrNull() ?: 0
-                                    val totalSeconds = minutesInt * 60 + secondsInt
-                                    
-                                    if (totalSeconds > 0) {
-                                        onAddTask(title, totalSeconds, isDaily)
-                                        clearForm()
+                        shape = RoundedCornerShape(12.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = seconds,
+                            onValueChange = { 
+                                seconds = it.filter { char -> char.isDigit() }
+                                durationError = false
+                            },
+                            label = { Text("Seconds") },
+                            isError = durationError,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .focusRequester(secondsFocusRequester),
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = Color.Transparent,
+                                focusedLabelColor = MaterialTheme.colorScheme.primary
+                            ),
+                            keyboardOptions = KeyboardOptions(
+                                imeAction = ImeAction.Done,
+                                keyboardType = KeyboardType.Number
+                            ),
+                            keyboardActions = KeyboardActions(
+                                onDone = {
+                                    // Validate and add task when Enter is pressed in seconds field
+                                    if (title.isNotBlank()) {
+                                        val minutesInt = minutes.toIntOrNull() ?: 0
+                                        val secondsInt = seconds.toIntOrNull() ?: 0
+                                        val totalSeconds = minutesInt * 60 + secondsInt
+                                        
+                                        if (totalSeconds > 0) {
+                                            onAddTask(title, totalSeconds, isDaily)
+                                            clearForm()
+                                        } else {
+                                            durationError = true
+                                        }
                                     } else {
-                                        durationError = true
+                                        titleError = true
+                                        titleFocusRequester.requestFocus()
                                     }
-                                } else {
-                                    titleError = true
-                                    titleFocusRequester.requestFocus()
                                 }
-                            }
+                            )
                         )
-                    )
+                    }
                 }
                 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(20.dp))
                 
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
+                // Daily task checkbox
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                 ) {
-                    Checkbox(
-                        checked = isDaily,
-                        onCheckedChange = { isDaily = it }
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Make this a daily task",
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = isDaily,
+                            onCheckedChange = { isDaily = it },
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "Make this a daily task",
+                            fontSize = 16.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
                 }
                 
+                // Error messages
                 if (durationError) {
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "Please enter a valid duration (at least 1 second)",
-                        color = MaterialTheme.colorScheme.error,
+                        color = ErrorRed,
                         fontSize = 12.sp,
-                        modifier = Modifier.padding(top = 4.dp)
+                        fontWeight = FontWeight.Medium
                     )
                 }
             }
@@ -542,14 +763,36 @@ fun AddTaskDialog(
                     
                     onAddTask(title, totalSeconds, isDaily)
                     clearForm() // Clear the form and re-focus title field
-                }
+                },
+                modifier = Modifier
+                    .background(
+                        brush = PrimaryGradient,
+                        shape = RoundedCornerShape(8.dp)
+                    ),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.Transparent
+                ),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
             ) {
-                Text("Add")
+                Text(
+                    "Add Task",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Done")
+            TextButton(
+                onClick = onDismiss,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            ) {
+                Text(
+                    "Cancel",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium
+                )
             }
         }
     )
@@ -571,6 +814,12 @@ fun EditTaskDialog(
     var durationError by remember { mutableStateOf(false) }
     var orderError by remember { mutableStateOf(false) }
     var isDaily by remember { mutableStateOf(task.isDaily) }
+    
+    // Focus management
+    val titleFocusRequester = remember { FocusRequester() }
+    val minutesFocusRequester = remember { FocusRequester() }
+    val secondsFocusRequester = remember { FocusRequester() }
+    val orderFocusRequester = remember { FocusRequester() }
     
     // Focus state tracking
     var titleFocused by remember { mutableStateOf(false) }
@@ -605,113 +854,221 @@ fun EditTaskDialog(
     
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Edit Task") },
+        modifier = Modifier.shadow(16.dp, RoundedCornerShape(20.dp)),
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(20.dp),
+        title = { 
+            Text(
+                "Edit Task",
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        },
         text = {
-            Column {
-                OutlinedTextField(
-                    value = title,
-                    onValueChange = { 
-                        title = it
-                        titleError = false
-                    },
-                    label = { Text("Task Title") },
-                    isError = titleError,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .onFocusChanged { titleFocused = it.isFocused }
-                )
-                
-                Spacer(modifier = Modifier.height(16.dp))
-                
+            Column(
+                modifier = Modifier.padding(vertical = 8.dp)
+            ) {
+                // Task title field
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                ) {
+                    OutlinedTextField(
+                        value = title,
+                        onValueChange = { 
+                            title = it
+                            titleError = false
+                        },
+                        label = { Text("Task Title") },
+                        isError = titleError,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .onFocusChanged { titleFocused = it.isFocused }
+                            .focusRequester(titleFocusRequester),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = Color.Transparent,
+                            focusedLabelColor = MaterialTheme.colorScheme.primary
+                        ),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                        keyboardActions = KeyboardActions(onNext = { minutesFocusRequester.requestFocus() })
+                    )
+                }
+                Spacer(modifier = Modifier.height(20.dp))
                 Text(
                     text = "Duration",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Medium,
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface
                 )
-                
-                Spacer(modifier = Modifier.height(8.dp))
-                
+                Spacer(modifier = Modifier.height(12.dp))
                 Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Card(
+                        modifier = Modifier.weight(1f),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = minutes,
+                            onValueChange = { 
+                                minutes = it.copy(text = it.text.filter { char -> char.isDigit() })
+                                durationError = false
+                            },
+                            label = { Text("Minutes") },
+                            isError = durationError,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .onFocusChanged { minutesFocused = it.isFocused }
+                                .focusRequester(minutesFocusRequester),
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = Color.Transparent,
+                                focusedLabelColor = MaterialTheme.colorScheme.primary
+                            ),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next, keyboardType = KeyboardType.Number),
+                            keyboardActions = KeyboardActions(onNext = { secondsFocusRequester.requestFocus() })
+                        )
+                    }
+                    Card(
+                        modifier = Modifier.weight(1f),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = seconds,
+                            onValueChange = { 
+                                seconds = it.copy(text = it.text.filter { char -> char.isDigit() })
+                                durationError = false
+                            },
+                            label = { Text("Seconds") },
+                            isError = durationError,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .onFocusChanged { secondsFocused = it.isFocused }
+                                .focusRequester(secondsFocusRequester),
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = Color.Transparent,
+                                focusedLabelColor = MaterialTheme.colorScheme.primary
+                            ),
+                            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next, keyboardType = KeyboardType.Number),
+                            keyboardActions = KeyboardActions(onNext = { orderFocusRequester.requestFocus() })
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(20.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                 ) {
                     OutlinedTextField(
-                        value = minutes,
+                        value = order,
                         onValueChange = { 
-                            minutes = it.copy(text = it.text.filter { char -> char.isDigit() })
-                            durationError = false
+                            order = it.copy(text = it.text.filter { char -> char.isDigit() })
+                            orderError = false
                         },
-                        label = { Text("Minutes") },
-                        isError = durationError,
+                        label = { Text("Position (1, 2, 3, etc.)") },
+                        isError = orderError,
                         modifier = Modifier
-                            .weight(1f)
-                            .onFocusChanged { minutesFocused = it.isFocused },
-                        singleLine = true
-                    )
-                    
-                    OutlinedTextField(
-                        value = seconds,
-                        onValueChange = { 
-                            seconds = it.copy(text = it.text.filter { char -> char.isDigit() })
-                            durationError = false
-                        },
-                        label = { Text("Seconds") },
-                        isError = durationError,
-                        modifier = Modifier
-                            .weight(1f)
-                            .onFocusChanged { secondsFocused = it.isFocused },
-                        singleLine = true
+                            .fillMaxWidth()
+                            .onFocusChanged { orderFocused = it.isFocused }
+                            .focusRequester(orderFocusRequester),
+                        singleLine = true,
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = Color.Transparent,
+                            focusedLabelColor = MaterialTheme.colorScheme.primary
+                        ),
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                        keyboardActions = KeyboardActions(onDone = {
+                            // Validate and save when Enter is pressed in order field
+                            if (title.text.isBlank()) {
+                                titleError = true
+                                titleFocusRequester.requestFocus()
+                                return@KeyboardActions
+                            }
+                            val minutesInt = minutes.text.toIntOrNull() ?: 0
+                            val secondsInt = seconds.text.toIntOrNull() ?: 0
+                            val totalSeconds = minutesInt * 60 + secondsInt
+                            if (totalSeconds <= 0) {
+                                durationError = true
+                                minutesFocusRequester.requestFocus()
+                                return@KeyboardActions
+                            }
+                            val orderInt = order.text.toIntOrNull() ?: 0
+                            if (orderInt <= 0) {
+                                orderError = true
+                                orderFocusRequester.requestFocus()
+                                return@KeyboardActions
+                            }
+                            onEditTask(title.text, totalSeconds, isDaily, orderInt - 1)
+                        })
                     )
                 }
-                
-                Spacer(modifier = Modifier.height(16.dp))
-                
-                OutlinedTextField(
-                    value = order,
-                    onValueChange = { 
-                        order = it.copy(text = it.text.filter { char -> char.isDigit() })
-                        orderError = false
-                    },
-                    label = { Text("Position (1, 2, 3, etc.)") },
-                    isError = orderError,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .onFocusChanged { orderFocused = it.isFocused },
-                    singleLine = true
-                )
-                
-                Spacer(modifier = Modifier.height(16.dp))
-                
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
+                Spacer(modifier = Modifier.height(20.dp))
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                 ) {
-                    Checkbox(
-                        checked = isDaily,
-                        onCheckedChange = { isDaily = it }
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Make this a daily task",
-                        fontSize = 14.sp,
-                        color = MaterialTheme.colorScheme.onSurface
-                    )
+                    Row(
+                        modifier = Modifier.padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(
+                            checked = isDaily,
+                            onCheckedChange = { isDaily = it },
+                            colors = CheckboxDefaults.colors(
+                                checkedColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "Make this a daily task",
+                            fontSize = 16.sp,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
                 }
-                
                 if (durationError) {
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "Please enter a valid duration (at least 1 second)",
-                        color = MaterialTheme.colorScheme.error,
+                        color = ErrorRed,
                         fontSize = 12.sp,
-                        modifier = Modifier.padding(top = 4.dp)
+                        fontWeight = FontWeight.Medium
                     )
                 }
-                
                 if (orderError) {
+                    Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         text = "Please enter a valid position (1 or higher)",
-                        color = MaterialTheme.colorScheme.error,
+                        color = ErrorRed,
                         fontSize = 12.sp,
-                        modifier = Modifier.padding(top = 4.dp)
+                        fontWeight = FontWeight.Medium
                     )
                 }
             }
@@ -721,33 +1078,54 @@ fun EditTaskDialog(
                 onClick = {
                     if (title.text.isBlank()) {
                         titleError = true
+                        titleFocusRequester.requestFocus()
                         return@Button
                     }
-                    
                     val minutesInt = minutes.text.toIntOrNull() ?: 0
                     val secondsInt = seconds.text.toIntOrNull() ?: 0
                     val totalSeconds = minutesInt * 60 + secondsInt
-                    
                     if (totalSeconds <= 0) {
                         durationError = true
+                        minutesFocusRequester.requestFocus()
                         return@Button
                     }
-                    
                     val orderInt = order.text.toIntOrNull() ?: 0
                     if (orderInt <= 0) {
                         orderError = true
+                        orderFocusRequester.requestFocus()
                         return@Button
                     }
-                    
-                    onEditTask(title.text, totalSeconds, isDaily, orderInt - 1) // Convert to 0-based index
-                }
+                    onEditTask(title.text, totalSeconds, isDaily, orderInt - 1)
+                },
+                modifier = Modifier
+                    .background(
+                        brush = PrimaryGradient,
+                        shape = RoundedCornerShape(8.dp)
+                    ),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.Transparent
+                ),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
             ) {
-                Text("Save")
+                Text(
+                    "Save Changes",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
+            TextButton(
+                onClick = onDismiss,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            ) {
+                Text(
+                    "Cancel",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium
+                )
             }
         }
     )
