@@ -42,9 +42,7 @@ class TimerService : Service() {
     
     companion object {
         const val CHANNEL_ID = "TimerChannel"
-        const val ALARM_CHANNEL_ID = "AlarmChannel"
         const val NOTIFICATION_ID = 1
-        const val ALARM_NOTIFICATION_ID = 2
         const val ACTION_START = "START"
         const val ACTION_PAUSE = "PAUSE"
         const val ACTION_STOP = "STOP"
@@ -152,47 +150,6 @@ class TimerService : Service() {
     private fun showAlarmScreen() {
         _showAlarm.value = true
         playAlarm()
-        showAlarmNotification()
-    }
-    
-    private fun showAlarmNotification() {
-        val task = _currentTask.value
-        val title = "Time's Up!"
-        val text = "${task?.title ?: "Task"} time has expired"
-        
-        val intent = Intent(this, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0, intent, PendingIntent.FLAG_IMMUTABLE
-        )
-        
-        val stopAlarmIntent = Intent(this, TimerService::class.java).apply {
-            action = ACTION_STOP_ALARM
-        }
-        val stopAlarmPendingIntent = PendingIntent.getService(
-            this, 5, stopAlarmIntent, PendingIntent.FLAG_IMMUTABLE
-        )
-        
-        val nextTaskIntent = Intent(this, TimerService::class.java).apply {
-            action = ACTION_NEXT_TASK
-        }
-        val nextTaskPendingIntent = PendingIntent.getService(
-            this, 4, nextTaskIntent, PendingIntent.FLAG_IMMUTABLE
-        )
-        
-        val notification = NotificationCompat.Builder(this, ALARM_CHANNEL_ID)
-            .setContentTitle(title)
-            .setContentText(text)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setContentIntent(pendingIntent)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setCategory(NotificationCompat.CATEGORY_ALARM)
-            .setAutoCancel(true)
-            .addAction(R.drawable.ic_launcher_foreground, "Stop Alarm", stopAlarmPendingIntent)
-            .addAction(R.drawable.ic_launcher_foreground, "Next Task", nextTaskPendingIntent)
-            .build()
-        
-        val notificationManager = getSystemService(NotificationManager::class.java)
-        notificationManager.notify(ALARM_NOTIFICATION_ID, notification)
     }
     
     private fun stopAlarm() {
@@ -200,10 +157,6 @@ class TimerService : Service() {
         mediaPlayer?.stop()
         mediaPlayer?.release()
         mediaPlayer = null
-        
-        // Cancel the alarm notification
-        val notificationManager = getSystemService(NotificationManager::class.java)
-        notificationManager.cancel(ALARM_NOTIFICATION_ID)
     }
     
     private fun nextTask() {
@@ -258,22 +211,14 @@ class TimerService : Service() {
             NotificationManager.IMPORTANCE_LOW
         ).apply {
             description = "Timer notifications"
-        }
-        
-        // Alarm channel
-        val alarmChannel = NotificationChannel(
-            ALARM_CHANNEL_ID,
-            "Alarm",
-            NotificationManager.IMPORTANCE_HIGH
-        ).apply {
-            description = "Alarm notifications"
-            enableVibration(true)
-            enableLights(true)
+            setShowBadge(false)
+            enableLights(false)
+            enableVibration(false)
+            setSound(null, null)
         }
         
         val notificationManager = getSystemService(NotificationManager::class.java)
         notificationManager.createNotificationChannel(timerChannel)
-        notificationManager.createNotificationChannel(alarmChannel)
     }
     
     private fun createNotification(): Notification {
@@ -350,24 +295,41 @@ class TimerService : Service() {
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
+            .setShowWhen(false)
+            .setOnlyAlertOnce(true)
+        
+        // Add progress bar for running tasks
+        if (_isRunning.value && task != null && !_showAlarm.value && !_isTransitioning.value) {
+            val totalTime = task.durationSeconds * 1000L
+            val elapsed = totalTime - timeRemaining
+            val progress = ((elapsed * 100) / totalTime).toInt()
+            
+            builder.setProgress(100, progress, false)
+                .setStyle(NotificationCompat.BigTextStyle().bigText("$text\nProgress: $progress%"))
+        } else {
+            builder.setStyle(NotificationCompat.BigTextStyle().bigText(text))
+        }
         
         when {
             _showAlarm.value -> {
-                builder.addAction(R.drawable.ic_launcher_foreground, "Stop Alarm", stopAlarmPendingIntent)
-                    .addAction(R.drawable.ic_launcher_foreground, "Next Task", nextTaskPendingIntent)
+                builder.addAction(R.drawable.ic_alarm_off, "Stop Alarm", stopAlarmPendingIntent)
+                    .addAction(R.drawable.ic_next, "Next Task", nextTaskPendingIntent)
+                    .setPriority(NotificationCompat.PRIORITY_HIGH)
+                    .setCategory(NotificationCompat.CATEGORY_ALARM)
             }
             _isTransitioning.value -> {
-                builder.addAction(R.drawable.ic_launcher_foreground, "Stop", stopPendingIntent)
-                    .addAction(R.drawable.ic_launcher_foreground, "Skip", skipTransitionPendingIntent)
+                builder.addAction(R.drawable.ic_stop, "Stop", stopPendingIntent)
+                    .addAction(R.drawable.ic_skip, "Skip", skipTransitionPendingIntent)
             }
             else -> {
+                // Normal state - prioritize the most important buttons
                 builder.addAction(
-                    R.drawable.ic_launcher_foreground,
+                    if (_isRunning.value) R.drawable.ic_pause else R.drawable.ic_play,
                     if (_isRunning.value) "Pause" else "Start",
                     startPausePendingIntent
                 )
-                    .addAction(R.drawable.ic_launcher_foreground, "Stop", stopPendingIntent)
-                    .addAction(R.drawable.ic_launcher_foreground, "Reset", resetPendingIntent)
+                    .addAction(R.drawable.ic_next, "Next Task", nextTaskPendingIntent)
+                    .addAction(R.drawable.ic_stop, "Stop", stopPendingIntent)
             }
         }
         
