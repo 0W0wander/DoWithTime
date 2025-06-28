@@ -78,6 +78,10 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     
     fun updateTaskWithOrder(task: Task, newOrder: Int) {
         viewModelScope.launch {
+            // First update the task with its new properties
+            repository.updateTask(task)
+            
+            // Then handle the order change if needed
             val currentTasks = _tasks.value.toMutableList()
             val currentIndex = currentTasks.indexOfFirst { it.id == task.id }
             
@@ -124,6 +128,11 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     
     fun setTimerService(service: TimerService) {
         timerService = service
+        
+        // Stop any existing timer when the service is first connected
+        // This prevents auto-start when the app launches
+        stopTimer()
+        
         viewModelScope.launch {
             service.currentTask.collect { task ->
                 _currentTask.value = task
@@ -196,6 +205,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         _currentTask.value?.let { task ->
             // Immediately set the time remaining to the current task's duration
             _timeRemaining.value = task.durationSeconds * 1000L
+            // Update the TimerService with the current task and its duration
+            timerService?.updateTask(task)
         }
         timerService?.let { service ->
             val intent = android.content.Intent(getApplication(), TimerService::class.java).apply {
@@ -206,11 +217,20 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     }
     
     fun nextTask() {
-        timerService?.let { service ->
-            val intent = android.content.Intent(getApplication(), TimerService::class.java).apply {
-                action = TimerService.ACTION_NEXT_TASK
+        _currentTask.value?.let { currentTask ->
+            viewModelScope.launch {
+                // Mark the current task as completed
+                markTaskCompleted(currentTask)
+                // Small delay to ensure the task list is updated
+                kotlinx.coroutines.delay(100)
+                // Then trigger the service to handle the transition
+                timerService?.let { service ->
+                    val intent = android.content.Intent(getApplication(), TimerService::class.java).apply {
+                        action = TimerService.ACTION_NEXT_TASK
+                    }
+                    getApplication<Application>().startService(intent)
+                }
             }
-            getApplication<Application>().startService(intent)
         }
     }
     
@@ -246,15 +266,15 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private fun moveToNextTask() {
         val incompleteTasks = _tasks.value
         
-        // Get the first incomplete task (which will be the next one in order)
+        // Always get the first incomplete task (topmost task)
         val nextTask = incompleteTasks.firstOrNull()
         
         if (nextTask != null) {
             _currentTask.value = nextTask
-            // Immediately set the time remaining to the next task's duration
+            // Set the time remaining to the next task's duration but don't start the timer
             _timeRemaining.value = nextTask.durationSeconds * 1000L
-            // Start the next task automatically with its correct duration
-            startCurrentTask()
+            // Update the TimerService with the new task and its duration
+            timerService?.updateTask(nextTask)
         } else {
             // No more tasks, stop the timer
             stopTimer()
@@ -264,12 +284,13 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     // Method to refresh current task from database
     fun refreshCurrentTask() {
         val incompleteTasks = repository.incompleteTasksState.value
-        if (_currentTask.value == null || !incompleteTasks.contains(_currentTask.value)) {
-            _currentTask.value = incompleteTasks.firstOrNull()
-            // Set the time remaining to the current task's duration
-            _currentTask.value?.let { task ->
-                _timeRemaining.value = task.durationSeconds * 1000L
-            }
+        // Always take the first task (topmost task) when starting tasks
+        _currentTask.value = incompleteTasks.firstOrNull()
+        // Set the time remaining to the current task's duration
+        _currentTask.value?.let { task ->
+            _timeRemaining.value = task.durationSeconds * 1000L
+            // Update the TimerService with the current task and its duration
+            timerService?.updateTask(task)
         }
     }
 } 

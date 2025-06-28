@@ -92,6 +92,13 @@ class TimerService : Service() {
         startForeground(NOTIFICATION_ID, createNotification())
     }
     
+    fun updateTask(task: Task) {
+        // Update the current task and time remaining without starting the timer
+        _currentTask.value = task
+        _timeRemaining.value = task.durationSeconds * 1000L
+        updateNotification()
+    }
+    
     private fun startTimer() {
         // Cancel any existing timer first
         countDownTimer?.cancel()
