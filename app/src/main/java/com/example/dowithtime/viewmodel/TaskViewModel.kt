@@ -81,6 +81,14 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             // First update the task with its new properties
             repository.updateTask(task)
             
+            // If this is the current task, update it immediately
+            if (_currentTask.value?.id == task.id) {
+                _currentTask.value = task
+                _timeRemaining.value = task.durationSeconds * 1000L
+                // Update the TimerService with the refreshed task
+                timerService?.updateTask(task)
+            }
+            
             // Then handle the order change if needed
             val currentTasks = _tasks.value.toMutableList()
             val currentIndex = currentTasks.indexOfFirst { it.id == task.id }
@@ -266,15 +274,17 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private fun moveToNextTask() {
         val incompleteTasks = _tasks.value
         
-        // Always get the first incomplete task (topmost task)
+        // Always get the first incomplete task (topmost task) with latest data
         val nextTask = incompleteTasks.firstOrNull()
         
         if (nextTask != null) {
             _currentTask.value = nextTask
-            // Set the time remaining to the next task's duration but don't start the timer
+            // Set the time remaining to the next task's duration
             _timeRemaining.value = nextTask.durationSeconds * 1000L
             // Update the TimerService with the new task and its duration
             timerService?.updateTask(nextTask)
+            // Start the timer for the NEW task automatically
+            timerService?.startTask(nextTask)
         } else {
             // No more tasks, stop the timer
             stopTimer()
