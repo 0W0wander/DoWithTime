@@ -124,13 +124,40 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     fun reorderTasks(fromIndex: Int, toIndex: Int) {
         viewModelScope.launch {
             val taskList = _tasks.value.toMutableList()
+            
+            // Ensure indices are valid
+            if (fromIndex < 0 || fromIndex >= taskList.size || 
+                toIndex < 0 || toIndex >= taskList.size || fromIndex == toIndex) {
+                println("Reorder: Invalid indices - from: $fromIndex, to: $toIndex, size: ${taskList.size}")
+                return@launch
+            }
+            
+            println("Reorder: Moving task from $fromIndex to $toIndex")
+            println("Before: ${taskList.map { it.title }}")
+            
             val movedTask = taskList.removeAt(fromIndex)
             taskList.add(toIndex, movedTask)
+            
+            println("After: ${taskList.map { it.title }}")
             
             // Update order for all tasks
             taskList.forEachIndexed { index, task ->
                 repository.updateTaskOrder(task.id, index)
             }
+            
+            // Add a small delay to ensure the database update is processed
+            delay(50)
+            
+            // Force refresh the task list
+            println("Current tasks after reorder: ${_tasks.value.map { it.title }}")
+        }
+    }
+    
+    fun reorderTask(fromIndex: Int, toIndex: Int) {
+        // Only reorder if indices are valid and different
+        if (fromIndex != toIndex && fromIndex >= 0 && toIndex >= 0 && 
+            fromIndex < _tasks.value.size && toIndex < _tasks.value.size) {
+            reorderTasks(fromIndex, toIndex)
         }
     }
     

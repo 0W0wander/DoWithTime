@@ -18,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
@@ -42,6 +43,15 @@ fun TodoListScreen(
     var showEditDialog by remember { mutableStateOf(false) }
     var editingTask by remember { mutableStateOf<Task?>(null) }
     var editingTaskPosition by remember { mutableStateOf(0) }
+    
+    // Debug: Log when tasks change
+    LaunchedEffect(tasks) {
+        println("UI: Tasks updated - ${tasks.mapIndexed { index, task -> "${index}:${task.title}" }}")
+    }
+    
+    // Drag state
+    var draggedItemId by remember { mutableStateOf<Int?>(null) }
+    var dragOffset by remember { mutableStateOf(0f) }
     
     Box(
         modifier = Modifier.fillMaxSize()
@@ -106,12 +116,69 @@ fun TodoListScreen(
                         TaskItem(
                             task = task,
                             index = index,
+                            totalTasks = tasks.size,
+                            isDragging = draggedItemId == task.id,
+                            dragOffset = if (draggedItemId == task.id) dragOffset else 0f,
                             onDelete = { viewModel.deleteTask(task) },
                             onComplete = { viewModel.markTaskCompleted(task) },
                             onEdit = { 
                                 editingTask = task
                                 editingTaskPosition = index
                                 showEditDialog = true
+                            },
+                            onDragStart = { offset ->
+                                val actualIndex = tasks.indexOfFirst { it.id == task.id }
+                                println("=== DRAG START ===")
+                                println("Task: ${task.title} (ID: ${task.id})")
+                                println("Current index: $index")
+                                println("Actual index: $actualIndex")
+                                println("Start offset: $offset")
+                                draggedItemId = task.id
+                                dragOffset = 0f
+                            },
+                            onDragEnd = { 
+                                val actualIndex = tasks.indexOfFirst { it.id == task.id }
+                                println("=== DRAG END ===")
+                                println("Final drag offset: $dragOffset")
+                                println("Actual index: $actualIndex")
+                                draggedItemId?.let { fromId ->
+                                    // Calculate target position based on final drag offset
+                                    // Use a simple threshold - if dragged more than 30 pixels, move
+                                    val threshold = 30f
+                                    val targetIndex = when {
+                                        dragOffset > threshold -> {
+                                            // Dragging down - move to next position
+                                            (actualIndex + 1).coerceAtMost(tasks.size - 1)
+                                        }
+                                        dragOffset < -threshold -> {
+                                            // Dragging up - move to previous position
+                                            (actualIndex - 1).coerceAtLeast(0)
+                                        }
+                                        else -> {
+                                            // Not dragged far enough - stay in same position
+                                            actualIndex
+                                        }
+                                    }
+                                    
+                                    // Debug output
+                                    println("Drag: from index $actualIndex to target $targetIndex, offset: $dragOffset")
+                                    println("Threshold: $threshold")
+                                    println("Will reorder: ${targetIndex != actualIndex}")
+                                    
+                                    if (targetIndex != actualIndex) {
+                                        println("Calling reorderTask($actualIndex, $targetIndex)")
+                                        viewModel.reorderTask(actualIndex, targetIndex)
+                                    }
+                                }
+                                draggedItemId = null
+                                dragOffset = 0f
+                                println("=== DRAG END COMPLETE ===")
+                            },
+                            onDrag = { change, dragAmount ->
+                                if (draggedItemId == task.id) {
+                                    dragOffset += dragAmount.y
+                                    println("Drag update: offset = $dragOffset, amount = $dragAmount")
+                                }
                             }
                         )
                     }
@@ -184,16 +251,38 @@ fun TodoListScreen(
 fun TaskItem(
     task: Task,
     index: Int,
+    totalTasks: Int,
+    isDragging: Boolean,
+    dragOffset: Float,
     onDelete: () -> Unit,
     onComplete: () -> Unit,
-    onEdit: () -> Unit
+    onEdit: () -> Unit,
+    onDragStart: (Offset) -> Unit,
+    onDragEnd: () -> Unit,
+    onDrag: (androidx.compose.ui.input.pointer.PointerInputChange, Offset) -> Unit
 ) {
     Card(
         modifier = Modifier
             .fillMaxWidth()
+            .graphicsLayer {
+                translationY = if (isDragging) dragOffset else 0f
+                alpha = if (isDragging) 0.8f else 1f
+                scaleX = if (isDragging) 1.05f else 1f
+                scaleY = if (isDragging) 1.05f else 1f
+            }
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = onDragStart,
+                    onDragEnd = onDragEnd,
+                    onDrag = onDrag
+                )
+            }
             .clickable { onEdit() },
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface
+        ),
+        elevation = CardDefaults.cardElevation(
+            defaultElevation = if (isDragging) 8.dp else 2.dp
         )
     ) {
         Row(
@@ -203,6 +292,16 @@ fun TaskItem(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // Drag handle
+            Icon(
+                Icons.Default.MoreVert,
+                contentDescription = "Drag to reorder",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(20.dp)
+            )
+            
+            Spacer(modifier = Modifier.width(8.dp))
+            
             Column(
                 modifier = Modifier
                     .weight(1f)
@@ -218,6 +317,13 @@ fun TaskItem(
                     fontSize = 14.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (isDragging) {
+                    Text(
+                        text = "Drag offset: ${dragOffset.toInt()}",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
             
             Row {
