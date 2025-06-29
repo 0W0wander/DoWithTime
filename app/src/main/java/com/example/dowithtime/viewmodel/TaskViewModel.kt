@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.dowithtime.data.AppDatabase
 import com.example.dowithtime.data.Task
 import com.example.dowithtime.data.TaskRepository
+import com.example.dowithtime.data.TaskList
 import com.example.dowithtime.service.TimerService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -41,9 +42,17 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     
     private var timerService: TimerService? = null
     
+    // Multi-list support
+    private val _taskLists = MutableStateFlow<List<TaskList>>(emptyList())
+    val taskLists: StateFlow<List<TaskList>> = _taskLists.asStateFlow()
+    private val _currentListId = MutableStateFlow(1)
+    val currentListId: StateFlow<Int> = _currentListId.asStateFlow()
+    
     init {
         val database = AppDatabase.getDatabase(application)
         repository = TaskRepository(database.taskDao())
+        refreshTaskLists()
+        refreshTasksForCurrentList()
         
         viewModelScope.launch {
             repository.incompleteTasks.collect { taskList ->
@@ -124,20 +133,19 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     fun reorderTasks(fromIndex: Int, toIndex: Int) {
         viewModelScope.launch {
             val taskList = _tasks.value.toMutableList()
-            
             // Ensure indices are valid
             if (fromIndex < 0 || fromIndex >= taskList.size || 
                 toIndex < 0 || toIndex >= taskList.size || fromIndex == toIndex) {
                 return@launch
             }
-            
             val movedTask = taskList.removeAt(fromIndex)
             taskList.add(toIndex, movedTask)
-            
             // Update order for all tasks
             taskList.forEachIndexed { index, task ->
                 repository.updateTaskOrder(task.id, index)
             }
+            // Force refresh the tasks for the current list to get a new list reference
+            refreshTasksForCurrentList()
         }
     }
     
@@ -319,6 +327,52 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             _timeRemaining.value = task.durationSeconds * 1000L
             // Update the TimerService with the current task and its duration
             timerService?.updateTask(task)
+        }
+    }
+    
+    fun selectList(listId: Int) {
+        _currentListId.value = listId
+        refreshTasksForCurrentList()
+    }
+    fun renameList(listId: Int, newName: String) {
+        viewModelScope.launch {
+            val list = _taskLists.value.find { it.id == listId }
+            if (list != null) {
+                repository.updateTaskList(list.copy(name = newName))
+            }
+        }
+    }
+    fun refreshTasksForCurrentList() {
+        viewModelScope.launch {
+            repository.getIncompleteTasksByList(_currentListId.value).collect { taskList ->
+                _tasks.value = taskList
+                repository.updateIncompleteTasksState(taskList)
+                if (_currentTask.value == null || !taskList.contains(_currentTask.value)) {
+                    _currentTask.value = taskList.firstOrNull()
+                }
+            }
+        }
+    }
+    fun refreshTaskLists() {
+        viewModelScope.launch {
+            repository.getAllTaskLists().collect { lists ->
+                _taskLists.value = lists
+            }
+        }
+    }
+    fun addTaskList(name: String) {
+        viewModelScope.launch {
+            repository.insertTaskList(TaskList(name = name))
+        }
+    }
+    fun updateTaskList(taskList: TaskList) {
+        viewModelScope.launch {
+            repository.updateTaskList(taskList)
+        }
+    }
+    fun deleteTaskList(listId: Int) {
+        viewModelScope.launch {
+            taskLists.value.find { it.id == listId }?.let { repository.deleteTaskList(it) }
         }
     }
 } 

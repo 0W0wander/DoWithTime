@@ -12,6 +12,14 @@ class TaskRepository(private val taskDao: TaskDao) {
     private val _incompleteTasksState = MutableStateFlow<List<Task>>(emptyList())
     val incompleteTasksState: StateFlow<List<Task>> = _incompleteTasksState
     
+    fun getIncompleteTasksByList(listId: Int): Flow<List<Task>> = taskDao.getIncompleteTasksByList(listId)
+
+    // TaskList methods
+    fun getAllTaskLists(): Flow<List<TaskList>> = taskDao.getAllTaskLists()
+    suspend fun insertTaskList(taskList: TaskList) = taskDao.insertTaskList(taskList)
+    suspend fun updateTaskList(taskList: TaskList) = taskDao.updateTaskList(taskList)
+    suspend fun deleteTaskList(taskList: TaskList) = taskDao.deleteTaskList(taskList)
+    
     init {
         // Update the state flow when incomplete tasks change
         // This will be handled by the ViewModel

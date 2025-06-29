@@ -1,6 +1,7 @@
 package com.example.dowithtime.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -13,8 +14,13 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -34,6 +40,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import com.example.dowithtime.data.Task
 import com.example.dowithtime.viewmodel.TaskViewModel
 import androidx.compose.ui.focus.FocusRequester
@@ -46,6 +53,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.toArgb
+import kotlinx.coroutines.launch
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -54,308 +64,336 @@ fun TodoListScreen(
     onNavigateToDo: () -> Unit
 ) {
     val tasks by viewModel.tasks.collectAsState()
+    val taskLists by viewModel.taskLists.collectAsState()
+    val currentListId by viewModel.currentListId.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
     var editingTask by remember { mutableStateOf<Task?>(null) }
     var editingTaskPosition by remember { mutableStateOf(0) }
-    
-    // Drag state
+    var showRenameDialog by remember { mutableStateOf(false) }
+    var renameListId by remember { mutableStateOf<Int?>(null) }
+    var renameListValue by remember { mutableStateOf(TextFieldValue("")) }
+    var showAddListDialog by remember { mutableStateOf(false) }
+    var newListName by remember { mutableStateOf(TextFieldValue("")) }
+
+    // Dailies selection state
+    var dailiesSelected by remember { mutableStateOf(false) }
+
+    // Drawer state
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
+
+    // Filter tasks for Dailies or selected list
+    val filteredTasks = if (dailiesSelected) tasks.filter { it.isDaily } else tasks
+
+    // Drag state - using the working system from old version
     var draggedItemId by remember { mutableStateOf<Int?>(null) }
     var dragOffset by remember { mutableStateOf(0f) }
     var hoveredIndex by remember { mutableStateOf<Int?>(null) }
-    
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        MaterialTheme.colorScheme.background,
-                        MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.1f)
-                    )
-                )
-            )
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(8.dp)
-        ) {
-            // Compact header
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                ),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            brush = PrimaryGradient,
-                            shape = RoundedCornerShape(8.dp)
-                        )
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column {
-                            Text(
-                                text = "DoWithTime",
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                            Text(
-                                text = "Manage your tasks",
-                                fontSize = 12.sp,
-                                color = Color.White.copy(alpha = 0.8f)
-                            )
-                        }
-                        Card(
-                            modifier = Modifier.size(28.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = Color.White.copy(alpha = 0.2f)
-                            ),
-                            shape = RoundedCornerShape(6.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "⏱",
-                                    fontSize = 14.sp,
-                                    color = Color.White
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-            
-            Spacer(modifier = Modifier.height(8.dp))
-            
-            // Task list - more compact
-            if (tasks.isEmpty()) {
-                Card(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .weight(1f),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surface
-                    ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                    shape = RoundedCornerShape(8.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(16.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally
-                        ) {
-                            Card(
-                                modifier = Modifier.size(36.dp),
-                                colors = CardDefaults.cardColors(
-                                    containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
-                                ),
-                                shape = RoundedCornerShape(8.dp),
-                                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier.fillMaxSize(),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "⏱",
-                                        fontSize = 16.sp,
-                                        color = MaterialTheme.colorScheme.primary
-                                    )
-                                }
-                            }
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "No tasks yet",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "Add your first task to get started!",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.Center,
-                                lineHeight = 16.sp
-                            )
-                        }
-                    }
-                }
-            } else {
-                val listState = rememberLazyListState()
-                
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f)
-                        .padding(bottom = 56.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp),
-                    state = listState
-                ) {
-                    itemsIndexed(
-                        items = tasks,
-                        key = { _, task -> task.id }
-                    ) { index, task ->
-                        TaskItem(
-                            task = task,
-                            index = index,
-                            totalTasks = tasks.size,
-                            isDragging = draggedItemId == task.id,
-                            dragOffset = if (draggedItemId == task.id) dragOffset else 0f,
-                            isHovered = hoveredIndex == index,
-                            onDelete = { viewModel.deleteTask(task) },
-                            onComplete = { viewModel.markTaskCompleted(task) },
-                            onEdit = { 
-                                editingTask = task
-                                editingTaskPosition = index
-                                showEditDialog = true
-                            },
-                            onDragStart = { offset ->
-                                val actualIndex = tasks.indexOfFirst { it.id == task.id }
-                                draggedItemId = task.id
-                                dragOffset = 0f
-                                hoveredIndex = null
-                            },
-                            onDragEnd = { 
-                                draggedItemId?.let { fromId ->
-                                    val threshold = 153f // compact card height in px (measured)
-                                    val actualIndex = tasks.indexOfFirst { it.id == fromId }
-                                    val targetIndex = when {
-                                        dragOffset > threshold -> {
-                                            val positionsDown = (dragOffset / threshold).toInt()
-                                            (actualIndex + positionsDown).coerceAtMost(tasks.size - 1)
-                                        }
-                                        dragOffset < -threshold -> {
-                                            val positionsUp = (-dragOffset / threshold).toInt()
-                                            (actualIndex - positionsUp).coerceAtLeast(0)
-                                        }
-                                        else -> actualIndex
-                                    }
-                                    if (targetIndex != actualIndex) {
-                                        viewModel.reorderTask(actualIndex, targetIndex)
-                                    }
-                                }
-                                draggedItemId = null
-                                dragOffset = 0f
-                                hoveredIndex = null
-                            },
-                            onDrag = { change, dragAmount ->
-                                if (draggedItemId == task.id) {
-                                    dragOffset += dragAmount.y
-                                    val threshold = 153f // compact card height in px (measured)
-                                    val actualIndex = tasks.indexOfFirst { it.id == task.id }
-                                    val targetIndex = when {
-                                        dragOffset > threshold -> {
-                                            val positionsDown = (dragOffset / threshold).toInt()
-                                            (actualIndex + positionsDown).coerceAtMost(tasks.size - 1)
-                                        }
-                                        dragOffset < -threshold -> {
-                                            val positionsUp = (-dragOffset / threshold).toInt()
-                                            (actualIndex - positionsUp).coerceAtLeast(0)
-                                        }
-                                        else -> actualIndex
-                                    }
-                                    hoveredIndex = if (targetIndex != actualIndex) targetIndex else null
-                                }
-                            }
-                        )
-                    }
-                }
-            }
-        }
-        // Compact Start Tasks button at bottom
-        if (tasks.isNotEmpty()) {
-            Card(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .padding(8.dp)
-                    .fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.surface
-                ),
-                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Button(
-                    onClick = {
-                        viewModel.startCurrentTask()
-                        onNavigateToDo()
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(
-                            brush = TimerGradient,
-                            shape = RoundedCornerShape(6.dp)
-                        )
-                        .padding(10.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.Transparent
-                    ),
-                    elevation = ButtonDefaults.buttonElevation(
-                        defaultElevation = 0.dp
-                    )
-                ) {
-                    Icon(
-                        Icons.Default.PlayArrow,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp)
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Start Tasks",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-            }
-        }
-        // Smaller floating action button
-        FloatingActionButton(
-            onClick = { showAddDialog = true },
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(12.dp),
-            containerColor = MaterialTheme.colorScheme.primary,
-            contentColor = Color.White,
-            elevation = FloatingActionButtonDefaults.elevation(0.dp)
-        ) {
-            Icon(
-                Icons.Default.Add,
-                contentDescription = "Add Task",
-                modifier = Modifier.size(18.dp)
-            )
+
+    // Force refresh of drag state when tasks change
+    LaunchedEffect(filteredTasks) {
+        if (draggedItemId != null) {
+            // If we're dragging and the task list changed, reset drag state
+            draggedItemId = null
+            dragOffset = 0f
+            hoveredIndex = null
         }
     }
-    
+
+    var showSettingsDialog by remember { mutableStateOf(false) }
+    var selectedAudioFile by remember { mutableStateOf("") }
+
+    // File picker launcher for MP3
+    val mp3PickerLauncher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            selectedAudioFile = uri.toString()
+            // TODO: Save to persistent settings if needed
+        }
+    }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            ModalDrawerSheet {
+                // Dailies section
+                Text(
+                    text = "Dailies",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 18.sp,
+                    modifier = Modifier.padding(16.dp)
+                )
+                NavigationDrawerItem(
+                    label = { Text("Dailies", fontWeight = if (dailiesSelected) FontWeight.Bold else FontWeight.Normal) },
+                    selected = dailiesSelected,
+                    onClick = {
+                        dailiesSelected = true
+                        scope.launch { drawerState.close() }
+                    },
+                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                )
+                Divider(modifier = Modifier.padding(vertical = 8.dp))
+                // User lists
+                Text(
+                    text = "Your Lists",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
+                )
+                taskLists.forEach { list ->
+                    NavigationDrawerItem(
+                        label = {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(list.name, fontWeight = if (!dailiesSelected && list.id == currentListId) FontWeight.Bold else FontWeight.Normal)
+                                Spacer(Modifier.width(8.dp))
+                                IconButton(onClick = {
+                                    renameListId = list.id
+                                    renameListValue = TextFieldValue(list.name)
+                                    showRenameDialog = true
+                                }) {
+                                    Icon(Icons.Default.Edit, contentDescription = "Rename List", modifier = Modifier.size(16.dp))
+                                }
+                                if (taskLists.size > 1) {
+                                    IconButton(onClick = { viewModel.deleteTaskList(list.id) }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete List", modifier = Modifier.size(16.dp))
+                                    }
+                                }
+                            }
+                        },
+                        selected = !dailiesSelected && list.id == currentListId,
+                        onClick = {
+                            dailiesSelected = false
+                            viewModel.selectList(list.id)
+                            scope.launch { drawerState.close() }
+                        },
+                        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                    )
+                }
+                // Add List button
+                Spacer(Modifier.height(16.dp))
+                Button(
+                    onClick = { showAddListDialog = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer
+                    )
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Add New List")
+                }
+                Spacer(Modifier.height(16.dp))
+                // Settings button
+                Button(
+                    onClick = { showSettingsDialog = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    )
+                ) {
+                    Icon(Icons.Default.Settings, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Settings")
+                }
+            }
+        }
+    ) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Text(
+                            text = if (dailiesSelected) "Dailies" else taskLists.find { it.id == currentListId }?.name ?: "Tasks",
+                            fontWeight = FontWeight.Bold
+                        )
+                    },
+                    navigationIcon = {
+                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                            Icon(Icons.Default.Menu, contentDescription = "Menu")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { showAddDialog = true }) {
+                            Icon(Icons.Default.Add, contentDescription = "Add Task")
+                        }
+                    }
+                )
+            }
+        ) { paddingValues ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(paddingValues)
+            ) {
+                if (filteredTasks.isEmpty()) {
+                    // Empty state
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(32.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = "No tasks yet",
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        Text(
+                            text = "Tap the + button to add your first task",
+                            fontSize = 16.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                } else {
+                    // Task list with working drag and drop
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 56.dp),
+                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        itemsIndexed(
+                            items = filteredTasks,
+                            key = { _, task -> task.id }
+                        ) { index, task ->
+                            TaskItem(
+                                task = task,
+                                index = index,
+                                totalTasks = filteredTasks.size,
+                                isDragging = draggedItemId == task.id,
+                                dragOffset = if (draggedItemId == task.id) dragOffset else 0f,
+                                isHovered = hoveredIndex == index,
+                                onDelete = { viewModel.deleteTask(task) },
+                                onComplete = { viewModel.markTaskCompleted(task) },
+                                onEdit = {
+                                    editingTask = task
+                                    editingTaskPosition = index
+                                    showEditDialog = true
+                                },
+                                onDragStart = { offset ->
+                                    // Always find the current position of the task being dragged
+                                    val currentIndex = filteredTasks.indexOfFirst { it.id == task.id }
+                                    if (currentIndex != -1) {
+                                        draggedItemId = task.id
+                                        dragOffset = 0f
+                                        hoveredIndex = null
+                                    }
+                                },
+                                onDragEnd = { 
+                                    draggedItemId?.let { fromId ->
+                                        val actualIndex = filteredTasks.indexOfFirst { it.id == fromId }
+                                        val targetIndex = hoveredIndex ?: actualIndex
+                                        if (targetIndex != actualIndex) {
+                                            viewModel.reorderTask(actualIndex, targetIndex)
+                                        }
+                                    }
+                                    // Reset all drag state completely
+                                    draggedItemId = null
+                                    dragOffset = 0f
+                                    hoveredIndex = null
+                                },
+                                onDrag = { change, dragAmount ->
+                                    if (draggedItemId == task.id) {
+                                        dragOffset += dragAmount.y
+                                        
+                                        // Always find the current position of the dragged task
+                                        val currentIndex = filteredTasks.indexOfFirst { it.id == draggedItemId }
+                                        if (currentIndex != -1) {
+                                            // Calculate which item we're closest to based on drag offset
+                                            val itemHeight = 80f // Approximate item height
+                                            val dragDistance = dragOffset
+                                            val itemsMoved = (dragDistance / itemHeight).toInt()
+                                            
+                                            val newTargetIndex = (currentIndex + itemsMoved).coerceIn(0, filteredTasks.size - 1)
+                                            hoveredIndex = if (newTargetIndex != currentIndex) newTargetIndex else null
+                                        }
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+                
+                // Compact Start Tasks button at bottom
+                if (filteredTasks.isNotEmpty()) {
+                    Card(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(8.dp)
+                            .fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surface
+                        ),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                viewModel.startCurrentTask()
+                                onNavigateToDo()
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    brush = TimerGradient,
+                                    shape = RoundedCornerShape(6.dp)
+                                )
+                                .padding(10.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = Color.Transparent
+                            ),
+                            elevation = ButtonDefaults.buttonElevation(
+                                defaultElevation = 0.dp
+                            )
+                        ) {
+                            Icon(
+                                Icons.Default.PlayArrow,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "Start Tasks",
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+                
+                // Smaller floating action button for adding tasks
+                FloatingActionButton(
+                    onClick = { showAddDialog = true },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        .padding(16.dp),
+                    containerColor = MaterialTheme.colorScheme.primary
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Add Task")
+                }
+            }
+        }
+    }
+
     // Add task dialog
     if (showAddDialog) {
         AddTaskDialog(
             onDismiss = { showAddDialog = false },
             onAddTask = { title, durationSeconds, isDaily ->
                 viewModel.addTask(title, durationSeconds, isDaily)
+                // Don't close the dialog - let it stay open for the next task
             }
         )
     }
-    
+
     // Edit task dialog
     if (showEditDialog && editingTask != null) {
         EditTaskDialog(
@@ -373,6 +411,95 @@ fun TodoListScreen(
                 ), order)
                 showEditDialog = false
                 editingTask = null
+            }
+        )
+    }
+
+    // Rename list dialog
+    if (showRenameDialog && renameListId != null) {
+        AlertDialog(
+            onDismissRequest = { showRenameDialog = false },
+            title = { Text("Rename List") },
+            text = {
+                OutlinedTextField(
+                    value = renameListValue,
+                    onValueChange = { renameListValue = it },
+                    label = { Text("List Name") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (renameListValue.text.isNotBlank()) {
+                        val list = taskLists.find { it.id == renameListId }
+                        list?.let { viewModel.updateTaskList(it.copy(name = renameListValue.text)) }
+                        showRenameDialog = false
+                    }
+                }) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showRenameDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Add list dialog
+    if (showAddListDialog) {
+        AlertDialog(
+            onDismissRequest = { showAddListDialog = false },
+            title = { Text("Add New List") },
+            text = {
+                OutlinedTextField(
+                    value = newListName,
+                    onValueChange = { newListName = it },
+                    label = { Text("List Name") },
+                    singleLine = true
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (newListName.text.isNotBlank()) {
+                        viewModel.addTaskList(newListName.text)
+                        newListName = TextFieldValue("")
+                        showAddListDialog = false
+                    }
+                }) {
+                    Text("Add")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showAddListDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+
+    // Settings dialog
+    if (showSettingsDialog) {
+        AlertDialog(
+            onDismissRequest = { showSettingsDialog = false },
+            title = { Text("Settings") },
+            text = {
+                Column {
+                    Text("Alarm Sound:")
+                    Spacer(Modifier.height(8.dp))
+                    Button(onClick = { mp3PickerLauncher.launch("audio/mpeg") }) {
+                        Text("Choose MP3 File")
+                    }
+                    if (selectedAudioFile.isNotEmpty()) {
+                        Text("Selected: $selectedAudioFile", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { showSettingsDialog = false }) {
+                    Text("Close")
+                }
             }
         )
     }
@@ -399,7 +526,7 @@ fun TaskItem(
             .graphicsLayer {
                 translationY = when {
                     isDragging -> dragOffset
-                    isHovered -> 8f
+                    isHovered -> 4f
                     else -> 0f
                 }
                 alpha = if (isDragging) 0.5f else 1f
@@ -414,11 +541,11 @@ fun TaskItem(
             .clickable { onEdit() },
         colors = CardDefaults.cardColors(
             containerColor = when {
-                isHovered -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)
+                isHovered -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
                 else -> MaterialTheme.colorScheme.surface
             }
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isHovered) 4.dp else 0.dp),
         shape = RoundedCornerShape(8.dp)
     ) {
         Row(

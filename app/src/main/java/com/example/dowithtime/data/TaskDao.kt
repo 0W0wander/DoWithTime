@@ -11,6 +11,9 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE isCompleted = 0 ORDER BY `order` ASC")
     fun getIncompleteTasks(): Flow<List<Task>>
     
+    @Query("SELECT * FROM tasks WHERE listId = :listId AND isCompleted = 0 ORDER BY `order` ASC")
+    fun getIncompleteTasksByList(listId: Int): Flow<List<Task>>
+    
     @Insert
     suspend fun insertTask(task: Task)
     
@@ -25,4 +28,17 @@ interface TaskDao {
     
     @Query("UPDATE tasks SET isCompleted = 1 WHERE id = :taskId")
     suspend fun markTaskCompleted(taskId: Int)
+    
+    // TaskList methods
+    @Query("SELECT * FROM task_lists")
+    fun getAllTaskLists(): Flow<List<TaskList>>
+    
+    @Insert
+    suspend fun insertTaskList(taskList: TaskList)
+    
+    @Update
+    suspend fun updateTaskList(taskList: TaskList)
+    
+    @Delete
+    suspend fun deleteTaskList(taskList: TaskList)
 } 
