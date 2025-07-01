@@ -12,5 +12,6 @@ data class Task(
     val isCompleted: Boolean = false,
     val order: Int = 0,
     val isDaily: Boolean = false,
-    val listId: Int = 1
+    val listId: Int = 1,
+    val completedToday: Boolean = false
 ) 

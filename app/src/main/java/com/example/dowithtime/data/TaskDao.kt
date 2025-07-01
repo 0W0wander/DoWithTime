@@ -14,6 +14,9 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE listId = :listId AND isCompleted = 0 ORDER BY `order` ASC")
     fun getIncompleteTasksByList(listId: Int): Flow<List<Task>>
     
+    @Query("SELECT * FROM tasks WHERE isDaily = 1 ORDER BY `order` ASC")
+    fun getAllDailyTasks(): Flow<List<Task>>
+    
     @Insert
     suspend fun insertTask(task: Task)
     
@@ -28,6 +31,12 @@ interface TaskDao {
     
     @Query("UPDATE tasks SET isCompleted = 1 WHERE id = :taskId")
     suspend fun markTaskCompleted(taskId: Int)
+    
+    @Query("UPDATE tasks SET completedToday = 1 WHERE id = :taskId")
+    suspend fun markDailyTaskCompleted(taskId: Int)
+    
+    @Query("UPDATE tasks SET completedToday = 0 WHERE isDaily = 1")
+    suspend fun resetDailyTaskCompletion()
     
     // TaskList methods
     @Query("SELECT * FROM task_lists")

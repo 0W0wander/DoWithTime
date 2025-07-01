@@ -13,6 +13,7 @@ class TaskRepository(private val taskDao: TaskDao) {
     val incompleteTasksState: StateFlow<List<Task>> = _incompleteTasksState
     
     fun getIncompleteTasksByList(listId: Int): Flow<List<Task>> = taskDao.getIncompleteTasksByList(listId)
+    fun getAllDailyTasks(): Flow<List<Task>> = taskDao.getAllDailyTasks()
 
     // TaskList methods
     fun getAllTaskLists(): Flow<List<TaskList>> = taskDao.getAllTaskLists()
@@ -43,6 +44,14 @@ class TaskRepository(private val taskDao: TaskDao) {
     
     suspend fun markTaskCompleted(taskId: Int) {
         taskDao.markTaskCompleted(taskId)
+    }
+    
+    suspend fun markDailyTaskCompleted(taskId: Int) {
+        taskDao.markDailyTaskCompleted(taskId)
+    }
+    
+    suspend fun resetDailyTaskCompletion() {
+        taskDao.resetDailyTaskCompletion()
     }
     
     // Method to update the state flow

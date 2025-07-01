@@ -56,6 +56,8 @@ import androidx.compose.ui.graphics.toArgb
 import kotlinx.coroutines.launch
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,8 +66,10 @@ fun TodoListScreen(
     onNavigateToDo: () -> Unit
 ) {
     val tasks by viewModel.tasks.collectAsState()
+    val dailyTasks by viewModel.dailyTasks.collectAsState()
     val taskLists by viewModel.taskLists.collectAsState()
     val currentListId by viewModel.currentListId.collectAsState()
+    val wasInDailyList by viewModel.wasInDailyList.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
     var editingTask by remember { mutableStateOf<Task?>(null) }
@@ -77,28 +81,34 @@ fun TodoListScreen(
     var newListName by remember { mutableStateOf(TextFieldValue("")) }
 
     // Dailies selection state
-    var dailiesSelected by remember { mutableStateOf(false) }
+    var dailiesSelected by remember { mutableStateOf(wasInDailyList) }
+    
+    // Update dailiesSelected when wasInDailyList changes
+    LaunchedEffect(wasInDailyList) {
+        dailiesSelected = wasInDailyList
+    }
 
     // Drawer state
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
     // Filter tasks for Dailies or selected list
-    val filteredTasks = if (dailiesSelected) tasks.filter { it.isDaily } else tasks
+    val filteredTasks = if (dailiesSelected) dailyTasks else tasks
 
-    // Drag state - using the working system from old version
+    // Drag state
     var draggedItemId by remember { mutableStateOf<Int?>(null) }
     var dragOffset by remember { mutableStateOf(0f) }
     var hoveredIndex by remember { mutableStateOf<Int?>(null) }
+    var originalDragIndex by remember { mutableStateOf<Int?>(null) }
+    // Track item positions (top..bottom in window)
+    val itemPositions = remember { mutableStateMapOf<Int, IntRange>() }
 
-    // Force refresh of drag state when tasks change
+    // Reset drag state whenever the list changes (e.g., after reorder)
     LaunchedEffect(filteredTasks) {
-        if (draggedItemId != null) {
-            // If we're dragging and the task list changed, reset drag state
-            draggedItemId = null
-            dragOffset = 0f
-            hoveredIndex = null
-        }
+        draggedItemId = null
+        dragOffset = 0f
+        hoveredIndex = null
+        originalDragIndex = null
     }
 
     var showSettingsDialog by remember { mutableStateOf(false) }
@@ -111,6 +121,9 @@ fun TodoListScreen(
             // TODO: Save to persistent settings if needed
         }
     }
+
+    // Add a reference to the LazyColumn's state
+    val listState = rememberLazyListState()
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -128,6 +141,7 @@ fun TodoListScreen(
                     selected = dailiesSelected,
                     onClick = {
                         dailiesSelected = true
+                        viewModel.setWasInDailyList(true)
                         scope.launch { drawerState.close() }
                     },
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
@@ -163,6 +177,7 @@ fun TodoListScreen(
                         selected = !dailiesSelected && list.id == currentListId,
                         onClick = {
                             dailiesSelected = false
+                            viewModel.setWasInDailyList(false)
                             viewModel.selectList(list.id)
                             scope.launch { drawerState.close() }
                         },
@@ -239,14 +254,14 @@ fun TodoListScreen(
                         verticalArrangement = Arrangement.Center
                     ) {
                         Text(
-                            text = "No tasks yet",
+                            text = if (dailiesSelected) "No daily tasks yet" else "No tasks yet",
                             fontSize = 24.sp,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(modifier = Modifier.height(16.dp))
                         Text(
-                            text = "Tap the + button to add your first task",
+                            text = if (dailiesSelected) "Tap the + button to add your first daily task" else "Tap the + button to add your first task",
                             fontSize = 16.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = TextAlign.Center
@@ -258,7 +273,8 @@ fun TodoListScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(bottom = 56.dp),
-                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                        state = listState
                     ) {
                         itemsIndexed(
                             items = filteredTasks,
@@ -272,50 +288,54 @@ fun TodoListScreen(
                                 dragOffset = if (draggedItemId == task.id) dragOffset else 0f,
                                 isHovered = hoveredIndex == index,
                                 onDelete = { viewModel.deleteTask(task) },
-                                onComplete = { viewModel.markTaskCompleted(task) },
+                                onComplete = { 
+                                    if (task.isDaily) {
+                                        viewModel.markDailyTaskCompleted(task)
+                                    } else {
+                                        viewModel.markTaskCompleted(task)
+                                    }
+                                },
                                 onEdit = {
                                     editingTask = task
                                     editingTaskPosition = index
                                     showEditDialog = true
                                 },
+                                onToggleDaily = { viewModel.toggleDailyTask(task) },
+                                modifier = Modifier.onGloballyPositioned { coordinates ->
+                                    val position = coordinates.positionInWindow().y.toInt()
+                                    val height = coordinates.size.height
+                                    itemPositions[task.id] = position until (position + height)
+                                },
                                 onDragStart = { offset ->
-                                    // Always find the current position of the task being dragged
-                                    val currentIndex = filteredTasks.indexOfFirst { it.id == task.id }
-                                    if (currentIndex != -1) {
-                                        draggedItemId = task.id
-                                        dragOffset = 0f
-                                        hoveredIndex = null
+                                    val actualIndex = filteredTasks.indexOfFirst { it.id == task.id }
+                                    draggedItemId = task.id
+                                    dragOffset = 0f
+                                    hoveredIndex = null
+                                    originalDragIndex = actualIndex
+                                },
+                                onDrag = { change, dragAmount ->
+                                    if (draggedItemId == task.id && originalDragIndex != null) {
+                                        dragOffset += dragAmount.y
+                                        val pointerY = change.position.y.toInt() + itemPositions[task.id]?.first.orZero()
+                                        val hoveredTaskId = itemPositions.entries.firstOrNull { (_, range) ->
+                                            pointerY in range
+                                        }?.key
+                                        val newHoveredIndex = hoveredTaskId?.let { filteredTasks.indexOfFirst { it2 -> it2.id == it } }?.takeIf { it != -1 && it != originalDragIndex }
+                                        if (newHoveredIndex != null) {
+                                            // Perform reorder immediately
+                                            viewModel.reorderTask(originalDragIndex!!, newHoveredIndex)
+                                            // Update drag state for continued dragging
+                                            originalDragIndex = newHoveredIndex
+                                            dragOffset = 0f
+                                        }
+                                        hoveredIndex = newHoveredIndex
                                     }
                                 },
-                                onDragEnd = { 
-                                    draggedItemId?.let { fromId ->
-                                        val actualIndex = filteredTasks.indexOfFirst { it.id == fromId }
-                                        val targetIndex = hoveredIndex ?: actualIndex
-                                        if (targetIndex != actualIndex) {
-                                            viewModel.reorderTask(actualIndex, targetIndex)
-                                        }
-                                    }
-                                    // Reset all drag state completely
+                                onDragEnd = {
                                     draggedItemId = null
                                     dragOffset = 0f
                                     hoveredIndex = null
-                                },
-                                onDrag = { change, dragAmount ->
-                                    if (draggedItemId == task.id) {
-                                        dragOffset += dragAmount.y
-                                        
-                                        // Always find the current position of the dragged task
-                                        val currentIndex = filteredTasks.indexOfFirst { it.id == draggedItemId }
-                                        if (currentIndex != -1) {
-                                            // Calculate which item we're closest to based on drag offset
-                                            val itemHeight = 80f // Approximate item height
-                                            val dragDistance = dragOffset
-                                            val itemsMoved = (dragDistance / itemHeight).toInt()
-                                            
-                                            val newTargetIndex = (currentIndex + itemsMoved).coerceIn(0, filteredTasks.size - 1)
-                                            hoveredIndex = if (newTargetIndex != currentIndex) newTargetIndex else null
-                                        }
-                                    }
+                                    originalDragIndex = null
                                 }
                             )
                         }
@@ -337,6 +357,7 @@ fun TodoListScreen(
                     ) {
                         Button(
                             onClick = {
+                                viewModel.setWasInDailyList(dailiesSelected)
                                 viewModel.startCurrentTask()
                                 onNavigateToDo()
                             },
@@ -368,17 +389,6 @@ fun TodoListScreen(
                         }
                     }
                 }
-                
-                // Smaller floating action button for adding tasks
-                FloatingActionButton(
-                    onClick = { showAddDialog = true },
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(16.dp),
-                    containerColor = MaterialTheme.colorScheme.primary
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = "Add Task")
-                }
             }
         }
     }
@@ -390,7 +400,8 @@ fun TodoListScreen(
             onAddTask = { title, durationSeconds, isDaily ->
                 viewModel.addTask(title, durationSeconds, isDaily)
                 // Don't close the dialog - let it stay open for the next task
-            }
+            },
+            isDaily = dailiesSelected
         )
     }
 
@@ -403,11 +414,10 @@ fun TodoListScreen(
                 showEditDialog = false
                 editingTask = null
             },
-            onEditTask = { title, durationSeconds, isDaily, order ->
+            onEditTask = { title, durationSeconds, _, order ->
                 viewModel.updateTaskWithOrder(editingTask!!.copy(
                     title = title,
-                    durationSeconds = durationSeconds,
-                    isDaily = isDaily
+                    durationSeconds = durationSeconds
                 ), order)
                 showEditDialog = false
                 editingTask = null
@@ -516,20 +526,25 @@ fun TaskItem(
     onDelete: () -> Unit,
     onComplete: () -> Unit,
     onEdit: () -> Unit,
+    onToggleDaily: () -> Unit,
+    modifier: Modifier = Modifier,
     onDragStart: (Offset) -> Unit,
-    onDragEnd: () -> Unit,
-    onDrag: (androidx.compose.ui.input.pointer.PointerInputChange, Offset) -> Unit
+    onDrag: (androidx.compose.ui.input.pointer.PointerInputChange, Offset) -> Unit,
+    onDragEnd: () -> Unit
 ) {
+    // Determine if this is a completed daily task
+    val isCompletedDaily = task.isDaily && task.completedToday
+    
     Card(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .graphicsLayer {
                 translationY = when {
                     isDragging -> dragOffset
-                    isHovered -> 4f
+                    isHovered -> 8f
                     else -> 0f
                 }
-                alpha = if (isDragging) 0.5f else 1f
+                alpha = if (isDragging) 0.5f else if (isCompletedDaily) 0.6f else 1f
             }
             .pointerInput(Unit) {
                 detectDragGestures(
@@ -541,11 +556,12 @@ fun TaskItem(
             .clickable { onEdit() },
         colors = CardDefaults.cardColors(
             containerColor = when {
-                isHovered -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
+                isHovered -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)
+                isCompletedDaily -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
                 else -> MaterialTheme.colorScheme.surface
             }
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = if (isHovered) 4.dp else 0.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         shape = RoundedCornerShape(8.dp)
     ) {
         Row(
@@ -561,26 +577,40 @@ fun TaskItem(
                     .padding(start = 2.dp),
                 verticalArrangement = Arrangement.Center
             ) {
-                Text(
-                    text = task.title,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = task.title,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isCompletedDaily) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1
+                    )
+
+                    if (isCompletedDaily) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "✓",
+                            fontSize = 16.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
                 Row(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         text = "⏱",
                         fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.primary
+                        color = if (isCompletedDaily) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary
                     )
                     Spacer(modifier = Modifier.width(2.dp))
                     Text(
                         text = formatDuration(task.durationSeconds),
                         fontSize = 13.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (isCompletedDaily) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -607,6 +637,30 @@ fun TaskItem(
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold
                 )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            // Daily toggle button
+            Card(
+                modifier = Modifier
+                    .size(32.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = if (task.isDaily) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                ),
+                shape = RoundedCornerShape(8.dp),
+                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clickable { onToggleDaily() },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "🔄",
+                        fontSize = 14.sp,
+                        color = if (task.isDaily) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
             Spacer(modifier = Modifier.width(8.dp))
             // Trash can icon centered in a small card
@@ -641,14 +695,14 @@ fun TaskItem(
 @Composable
 fun AddTaskDialog(
     onDismiss: () -> Unit,
-    onAddTask: (String, Int, Boolean) -> Unit
+    onAddTask: (String, Int, Boolean) -> Unit,
+    isDaily: Boolean = false
 ) {
     var title by remember { mutableStateOf("") }
     var minutes by remember { mutableStateOf("") }
     var seconds by remember { mutableStateOf("") }
     var titleError by remember { mutableStateOf(false) }
     var durationError by remember { mutableStateOf(false) }
-    var isDaily by remember { mutableStateOf(false) }
     
     // Focus management
     val titleFocusRequester = remember { FocusRequester() }
@@ -666,7 +720,6 @@ fun AddTaskDialog(
         seconds = ""
         titleError = false
         durationError = false
-        isDaily = false
         // Re-focus title field after clearing
         titleFocusRequester.requestFocus()
     }
@@ -678,7 +731,7 @@ fun AddTaskDialog(
         shape = RoundedCornerShape(20.dp),
         title = { 
             Text(
-                "Add New Task",
+                if (isDaily) "Add New Daily Task" else "Add New Task",
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
@@ -828,37 +881,6 @@ fun AddTaskDialog(
                     }
                 }
                 
-                Spacer(modifier = Modifier.height(20.dp))
-                
-                // Daily task checkbox
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Checkbox(
-                            checked = isDaily,
-                            onCheckedChange = { isDaily = it },
-                            colors = CheckboxDefaults.colors(
-                                checkedColor = MaterialTheme.colorScheme.primary
-                            )
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = "Make this a daily task",
-                            fontSize = 16.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-                
                 // Error messages
                 if (durationError) {
                     Spacer(modifier = Modifier.height(8.dp))
@@ -940,7 +962,7 @@ fun EditTaskDialog(
     var titleError by remember { mutableStateOf(false) }
     var durationError by remember { mutableStateOf(false) }
     var orderError by remember { mutableStateOf(false) }
-    var isDaily by remember { mutableStateOf(task.isDaily) }
+    // Daily tasks cannot be edited to change their daily status
     
     // Focus management
     val titleFocusRequester = remember { FocusRequester() }
@@ -1148,38 +1170,11 @@ fun EditTaskDialog(
                                 orderFocusRequester.requestFocus()
                                 return@KeyboardActions
                             }
-                            onEditTask(title.text, totalSeconds, isDaily, orderInt - 1)
+                            onEditTask(title.text, totalSeconds, task.isDaily, orderInt - 1)
                         })
                     )
                 }
-                Spacer(modifier = Modifier.height(20.dp))
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Checkbox(
-                            checked = isDaily,
-                            onCheckedChange = { isDaily = it },
-                            colors = CheckboxDefaults.colors(
-                                checkedColor = MaterialTheme.colorScheme.primary
-                            )
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = "Make this a daily task",
-                            fontSize = 16.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
+
                 if (durationError) {
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
@@ -1222,7 +1217,7 @@ fun EditTaskDialog(
                         orderFocusRequester.requestFocus()
                         return@Button
                     }
-                    onEditTask(title.text, totalSeconds, isDaily, orderInt - 1)
+                    onEditTask(title.text, totalSeconds, task.isDaily, orderInt - 1)
                 },
                 modifier = Modifier
                     .background(
@@ -1268,4 +1263,6 @@ private fun formatDuration(durationSeconds: Int): String {
         seconds > 0 -> "${seconds}s"
         else -> "0s"
     }
-} 
+}
+
+private fun Int?.orZero() = this ?: 0 

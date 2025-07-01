@@ -19,6 +19,9 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val _tasks = MutableStateFlow<List<Task>>(emptyList())
     val tasks: StateFlow<List<Task>> = _tasks.asStateFlow()
     
+    private val _dailyTasks = MutableStateFlow<List<Task>>(emptyList())
+    val dailyTasks: StateFlow<List<Task>> = _dailyTasks.asStateFlow()
+    
     private val _currentTask = MutableStateFlow<Task?>(null)
     val currentTask: StateFlow<Task?> = _currentTask.asStateFlow()
     
@@ -48,11 +51,17 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val _currentListId = MutableStateFlow(1)
     val currentListId: StateFlow<Int> = _currentListId.asStateFlow()
     
+    private val _wasInDailyList = MutableStateFlow(false)
+    val wasInDailyList: StateFlow<Boolean> = _wasInDailyList.asStateFlow()
+    
     init {
         val database = AppDatabase.getDatabase(application)
         repository = TaskRepository(database.taskDao())
         refreshTaskLists()
         refreshTasksForCurrentList()
+        
+        // Reset daily task completion at app start
+        resetDailyTaskCompletion()
         
         viewModelScope.launch {
             repository.incompleteTasks.collect { taskList ->
@@ -62,6 +71,12 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 if (_currentTask.value == null || !taskList.contains(_currentTask.value)) {
                     _currentTask.value = taskList.firstOrNull()
                 }
+            }
+        }
+        
+        viewModelScope.launch {
+            repository.getAllDailyTasks().collect { dailyTaskList ->
+                _dailyTasks.value = dailyTaskList
             }
         }
     }
@@ -127,6 +142,38 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     fun markTaskCompleted(task: Task) {
         viewModelScope.launch {
             repository.markTaskCompleted(task.id)
+        }
+    }
+    
+    fun markDailyTaskCompleted(task: Task) {
+        viewModelScope.launch {
+            repository.markDailyTaskCompleted(task.id)
+            // Refresh daily tasks to get updated completion status
+            refreshDailyTasks()
+        }
+    }
+    
+    fun resetDailyTaskCompletion() {
+        viewModelScope.launch {
+            repository.resetDailyTaskCompletion()
+            // Refresh daily tasks after resetting completion status
+            refreshDailyTasks()
+        }
+    }
+    
+    private fun refreshDailyTasks() {
+        viewModelScope.launch {
+            repository.getAllDailyTasks().collect { dailyTaskList ->
+                _dailyTasks.value = dailyTaskList
+            }
+        }
+    }
+    
+    fun toggleDailyTask(task: Task) {
+        viewModelScope.launch {
+            repository.updateTask(task.copy(isDaily = !task.isDaily))
+            // Refresh daily tasks after toggling daily status
+            refreshDailyTasks()
         }
     }
     
@@ -253,8 +300,13 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     fun nextTask() {
         _currentTask.value?.let { currentTask ->
             viewModelScope.launch {
-                // Mark the current task as completed
-                markTaskCompleted(currentTask)
+                if (currentTask.isDaily) {
+                    // For daily tasks, mark as completed for today but don't remove from list
+                    markDailyTaskCompleted(currentTask)
+                } else {
+                    // For regular tasks, mark as completed and remove from list
+                    markTaskCompleted(currentTask)
+                }
                 // Small delay to ensure the task list is updated
                 kotlinx.coroutines.delay(100)
                 // Then trigger the service to handle the transition
@@ -289,7 +341,13 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     fun completeCurrentTaskEarly() {
         _currentTask.value?.let { task ->
             viewModelScope.launch {
-                markTaskCompleted(task)
+                if (task.isDaily) {
+                    // For daily tasks, mark as completed for today but don't remove from list
+                    markDailyTaskCompleted(task)
+                } else {
+                    // For regular tasks, mark as completed and remove from list
+                    markTaskCompleted(task)
+                }
                 // Small delay to ensure the task list is updated
                 kotlinx.coroutines.delay(100)
                 moveToNextTask()
@@ -298,10 +356,17 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     }
     
     private fun moveToNextTask() {
-        val incompleteTasks = _tasks.value
+        // Check if we're working with daily tasks
+        val currentTask = _currentTask.value
+        val isWorkingWithDailyTasks = currentTask?.isDaily == true
         
-        // Always get the first incomplete task (topmost task) with latest data
-        val nextTask = incompleteTasks.firstOrNull()
+        val nextTask = if (isWorkingWithDailyTasks) {
+            // For daily tasks, find the first uncompleted daily task
+            _dailyTasks.value.firstOrNull { !it.completedToday }
+        } else {
+            // For regular tasks, find the first incomplete task
+            _tasks.value.firstOrNull()
+        }
         
         if (nextTask != null) {
             _currentTask.value = nextTask
@@ -319,9 +384,18 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     
     // Method to refresh current task from database
     fun refreshCurrentTask() {
-        val incompleteTasks = repository.incompleteTasksState.value
-        // Always take the first task (topmost task) when starting tasks
-        _currentTask.value = incompleteTasks.firstOrNull()
+        // Check if we should be working with daily tasks based on the remembered state
+        val shouldWorkWithDailyTasks = _wasInDailyList.value
+        
+        val firstTask = if (shouldWorkWithDailyTasks) {
+            // For daily tasks, find the first uncompleted daily task
+            _dailyTasks.value.firstOrNull { !it.completedToday }
+        } else {
+            // For regular tasks, find the first incomplete task
+            repository.incompleteTasksState.value.firstOrNull()
+        }
+        
+        _currentTask.value = firstTask
         // Set the time remaining to the current task's duration
         _currentTask.value?.let { task ->
             _timeRemaining.value = task.durationSeconds * 1000L
@@ -333,6 +407,10 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     fun selectList(listId: Int) {
         _currentListId.value = listId
         refreshTasksForCurrentList()
+    }
+    
+    fun setWasInDailyList(wasInDaily: Boolean) {
+        _wasInDailyList.value = wasInDaily
     }
     fun renameList(listId: Int, newName: String) {
         viewModelScope.launch {
