@@ -22,6 +22,8 @@ import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -43,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.example.dowithtime.data.Task
+import com.example.dowithtime.data.TaskList
 import com.example.dowithtime.viewmodel.TaskViewModel
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -70,7 +73,6 @@ fun TodoListScreen(
     val taskLists by viewModel.taskLists.collectAsState()
     val currentListId by viewModel.currentListId.collectAsState()
     val wasInDailyList by viewModel.wasInDailyList.collectAsState()
-    val copiedTasks by viewModel.copiedTasks.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
     var editingTask by remember { mutableStateOf<Task?>(null) }
@@ -81,7 +83,9 @@ fun TodoListScreen(
     var showAddListDialog by remember { mutableStateOf(false) }
     var newListName by remember { mutableStateOf(TextFieldValue("")) }
     var showMoveTasksDialog by remember { mutableStateOf(false) }
-    var showPasteDialog by remember { mutableStateOf(false) }
+    var showPasteToListDialog by remember { mutableStateOf(false) }
+    var pasteSourceListId by remember { mutableStateOf<Int?>(null) }
+    var pasteSourceIsDaily by remember { mutableStateOf(false) }
 
     // Dailies selection state
     var dailiesSelected by remember { mutableStateOf(wasInDailyList) }
@@ -141,11 +145,13 @@ fun TodoListScreen(
                     )
                     IconButton(
                         onClick = { 
-                            viewModel.copyDailyTasks()
+                            pasteSourceIsDaily = true
+                            pasteSourceListId = null
+                            showPasteToListDialog = true
                             scope.launch { drawerState.close() }
                         }
                     ) {
-                        Icon(Icons.Default.MoreVert, contentDescription = "Copy Dailies", modifier = Modifier.size(16.dp))
+                        Icon(Icons.Default.MoreVert, contentDescription = "Paste Dailies to other list", modifier = Modifier.size(16.dp))
                     }
                 }
                 Divider(modifier = Modifier.padding(vertical = 8.dp))
@@ -191,11 +197,13 @@ fun TodoListScreen(
                         )
                         IconButton(
                             onClick = { 
-                                viewModel.copyTasksFromList(list.id)
+                                pasteSourceIsDaily = false
+                                pasteSourceListId = list.id
+                                showPasteToListDialog = true
                                 scope.launch { drawerState.close() }
                             }
                         ) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "Copy List", modifier = Modifier.size(16.dp))
+                            Icon(Icons.Default.MoreVert, contentDescription = "Paste List to other list", modifier = Modifier.size(16.dp))
                         }
                     }
                 }
@@ -262,11 +270,6 @@ fun TodoListScreen(
                         }
                     },
                     actions = {
-                        if (copiedTasks.isNotEmpty()) {
-                            IconButton(onClick = { showPasteDialog = true }) {
-                                Icon(Icons.Default.MoreVert, contentDescription = "Paste ${copiedTasks.size} Tasks")
-                            }
-                        }
                         IconButton(onClick = { showAddDialog = true }) {
                             Icon(Icons.Default.Add, contentDescription = "Add Task")
                         }
@@ -526,18 +529,16 @@ fun TodoListScreen(
         )
     }
     
-    // Paste Tasks dialog
-    if (showPasteDialog) {
-        PasteTasksDialog(
-            copiedTasks = copiedTasks,
-            onDismiss = { showPasteDialog = false },
-            onPasteTasks = { targetPosition ->
-                viewModel.pasteTasksAtPosition(targetPosition)
-                showPasteDialog = false
-            },
-            onClearCopiedTasks = {
-                viewModel.clearCopiedTasks()
-                showPasteDialog = false
+    // Paste to List dialog
+    if (showPasteToListDialog) {
+        PasteToListDialog(
+            sourceListId = pasteSourceListId,
+            sourceIsDaily = pasteSourceIsDaily,
+            taskLists = taskLists,
+            onDismiss = { showPasteToListDialog = false },
+            onPasteTasks = { targetListId, targetPosition ->
+                viewModel.pasteTasksFromListToPosition(pasteSourceListId, pasteSourceIsDaily, targetListId, targetPosition)
+                showPasteToListDialog = false
             }
         )
     }
@@ -1435,20 +1436,23 @@ fun MoveTasksDialog(
 }
 
 @Composable
-fun PasteTasksDialog(
-    copiedTasks: List<Task>,
+fun PasteToListDialog(
+    sourceListId: Int?,
+    sourceIsDaily: Boolean,
+    taskLists: List<TaskList>,
     onDismiss: () -> Unit,
-    onPasteTasks: (Int) -> Unit,
-    onClearCopiedTasks: () -> Unit
+    onPasteTasks: (Int, Int) -> Unit
 ) {
+    var selectedTargetListId by remember { mutableStateOf(0) } // 0 for unselected, -1 for daily, positive for regular lists
     var targetPosition by remember { mutableStateOf(TextFieldValue("1")) }
     var positionError by remember { mutableStateOf(false) }
+    var expanded by remember { mutableStateOf(false) }
     
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { 
             Text(
-                "Paste Tasks",
+                "Paste Tasks to Other List",
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onSurface
@@ -1459,40 +1463,61 @@ fun PasteTasksDialog(
                 modifier = Modifier.padding(vertical = 8.dp)
             ) {
                 Text(
-                    text = "Copied ${copiedTasks.size} task${if (copiedTasks.size != 1) "s" else ""}:",
+                    text = "Select target list:",
                     fontSize = 16.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.padding(bottom = 12.dp)
+                    modifier = Modifier.padding(bottom = 8.dp)
                 )
                 
-                // Show copied tasks
-                LazyColumn(
-                    modifier = Modifier
-                        .heightIn(max = 150.dp)
-                        .fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    items(copiedTasks) { task ->
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(8.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = task.title,
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    text = formatDuration(task.durationSeconds),
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                // Dropdown for target list selection
+                Box {
+                    OutlinedTextField(
+                        value = when (selectedTargetListId) {
+                            -1 -> "Dailies"
+                            else -> taskLists.find { it.id == selectedTargetListId }?.name ?: "Select a list"
+                        },
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = { 
+                            IconButton(onClick = { expanded = !expanded }) {
+                                Icon(
+                                    if (expanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                    contentDescription = "Toggle dropdown"
                                 )
                             }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = MaterialTheme.colorScheme.primary,
+                            unfocusedBorderColor = Color.Transparent,
+                            focusedLabelColor = MaterialTheme.colorScheme.primary
+                        )
+                    )
+                    
+                    DropdownMenu(
+                        expanded = expanded,
+                        onDismissRequest = { expanded = false },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        // Daily option
+                        DropdownMenuItem(
+                            text = { Text("Dailies") },
+                            onClick = {
+                                selectedTargetListId = -1
+                                expanded = false
+                            }
+                        )
+                        
+                        // Regular lists
+                        taskLists.forEach { list ->
+                            DropdownMenuItem(
+                                text = { Text(list.name) },
+                                onClick = {
+                                    selectedTargetListId = list.id
+                                    expanded = false
+                                }
+                            )
                         }
                     }
                 }
@@ -1544,8 +1569,9 @@ fun PasteTasksDialog(
                         positionError = true
                         return@Button
                     }
-                    onPasteTasks(positionInt - 1)
+                    onPasteTasks(selectedTargetListId, positionInt - 1)
                 },
+                enabled = selectedTargetListId != 0, // 0 is the default "Select a list" state
                 modifier = Modifier
                     .background(
                         brush = PrimaryGradient,
@@ -1564,31 +1590,17 @@ fun PasteTasksDialog(
             }
         },
         dismissButton = {
-            Row {
-                TextButton(
-                    onClick = onClearCopiedTasks,
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = ErrorRed
-                    )
-                ) {
-                    Text(
-                        "Clear",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
-                TextButton(
-                    onClick = onDismiss,
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                ) {
-                    Text(
-                        "Cancel",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
+            TextButton(
+                onClick = onDismiss,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            ) {
+                Text(
+                    "Cancel",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium
+                )
             }
         }
     )

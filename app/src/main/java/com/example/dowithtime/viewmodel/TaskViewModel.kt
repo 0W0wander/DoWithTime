@@ -55,8 +55,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val _wasInDailyList = MutableStateFlow(false)
     val wasInDailyList: StateFlow<Boolean> = _wasInDailyList.asStateFlow()
     
-    private val _copiedTasks = MutableStateFlow<List<Task>>(emptyList())
-    val copiedTasks: StateFlow<List<Task>> = _copiedTasks.asStateFlow()
+
     
     init {
         val database = AppDatabase.getDatabase(application)
@@ -436,36 +435,25 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         _wasInDailyList.value = wasInDaily
     }
     
-    fun copyTasksFromList(listId: Int) {
+    fun pasteTasksFromListToPosition(sourceListId: Int?, isSourceDaily: Boolean, targetListId: Int, targetPosition: Int) {
         viewModelScope.launch {
-            val tasksFromList = repository.getIncompleteTasksByList(listId).first()
-            _copiedTasks.value = tasksFromList
-        }
-    }
-    
-    fun copyDailyTasks() {
-        viewModelScope.launch {
-            _copiedTasks.value = _dailyTasks.value
-        }
-    }
-    
-    fun pasteTasksAtPosition(targetPosition: Int) {
-        viewModelScope.launch {
-            val tasksToPaste = _copiedTasks.value
+            val tasksToPaste = if (isSourceDaily) {
+                _dailyTasks.value
+            } else {
+                repository.getIncompleteTasksByList(sourceListId!!).first()
+            }
+            
             if (tasksToPaste.isNotEmpty()) {
-                if (_wasInDailyList.value) {
+                val isTargetDaily = targetListId == -1 // -1 represents daily list
+                if (isTargetDaily) {
                     insertDailyTasksAtPosition(tasksToPaste, targetPosition)
                 } else {
-                    insertTasksAtPosition(tasksToPaste, targetPosition)
+                    // For regular lists, we need to handle the list assignment
+                    val tasksWithNewList = tasksToPaste.map { it.copy(listId = targetListId) }
+                    insertTasksAtPosition(tasksWithNewList, targetPosition)
                 }
-                // Clear copied tasks after pasting
-                _copiedTasks.value = emptyList()
             }
         }
-    }
-    
-    fun clearCopiedTasks() {
-        _copiedTasks.value = emptyList()
     }
     fun renameList(listId: Int, newName: String) {
         viewModelScope.launch {
