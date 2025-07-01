@@ -14,6 +14,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 
 class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val repository: TaskRepository
@@ -496,4 +498,65 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             taskLists.value.find { it.id == listId }?.let { repository.deleteTaskList(it) }
         }
     }
+
+    // Sync functionality
+    fun exportData(): String {
+        val gson = Gson()
+        val syncData = SyncData(
+            tasks = _tasks.value,
+            dailyTasks = _dailyTasks.value,
+            taskLists = _taskLists.value,
+            currentListId = _currentListId.value,
+            wasInDailyList = _wasInDailyList.value
+        )
+        return gson.toJson(syncData)
+    }
+
+    fun importData(jsonData: String): Boolean {
+        return try {
+            val gson = Gson()
+            val syncData = gson.fromJson(jsonData, SyncData::class.java)
+            
+            viewModelScope.launch {
+                // Clear existing data
+                repository.deleteAllTasks()
+                repository.deleteAllTaskLists()
+                
+                // Import task lists
+                syncData.taskLists.forEach { taskList ->
+                    repository.insertTaskList(taskList)
+                }
+                
+                // Import tasks
+                syncData.tasks.forEach { task ->
+                    repository.insertTask(task)
+                }
+                
+                // Import daily tasks
+                syncData.dailyTasks.forEach { task ->
+                    repository.insertTask(task)
+                }
+                
+                // Update state
+                _currentListId.value = syncData.currentListId
+                _wasInDailyList.value = syncData.wasInDailyList
+                
+                // Refresh data
+                refreshTaskLists()
+                refreshTasksForCurrentList()
+                refreshDailyTasks()
+            }
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    data class SyncData(
+        val tasks: List<Task>,
+        val dailyTasks: List<Task>,
+        val taskLists: List<TaskList>,
+        val currentListId: Int,
+        val wasInDailyList: Boolean
+    )
 } 

@@ -13,3 +13,15 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Web app
+webapp/node_modules/
+webapp/build/
+webapp/.env
+webapp/.env.local
+webapp/.env.development.local
+webapp/.env.test.local
+webapp/.env.production.local
+webapp/npm-debug.log*
+webapp/yarn-debug.log*
+webapp/yarn-error.log*

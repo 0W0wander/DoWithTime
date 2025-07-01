@@ -44,6 +44,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
+import androidx.compose.ui.platform.LocalContext
+import android.content.ClipboardManager
+import android.content.Context
 import com.example.dowithtime.data.Task
 import com.example.dowithtime.data.TaskList
 import com.example.dowithtime.viewmodel.TaskViewModel
@@ -86,6 +89,8 @@ fun TodoListScreen(
     var showPasteToListDialog by remember { mutableStateOf(false) }
     var pasteSourceListId by remember { mutableStateOf<Int?>(null) }
     var pasteSourceIsDaily by remember { mutableStateOf(false) }
+    var showSyncDialog by remember { mutableStateOf(false) }
+    var syncData by remember { mutableStateOf("") }
 
     // Dailies selection state
     var dailiesSelected by remember { mutableStateOf(wasInDailyList) }
@@ -270,6 +275,9 @@ fun TodoListScreen(
                         }
                     },
                     actions = {
+                        IconButton(onClick = { showSyncDialog = true }) {
+                            Icon(Icons.Default.Settings, contentDescription = "Sync")
+                        }
                         IconButton(onClick = { showAddDialog = true }) {
                             Icon(Icons.Default.Add, contentDescription = "Add Task")
                         }
@@ -507,6 +515,72 @@ fun TodoListScreen(
             },
             confirmButton = {
                 Button(onClick = { showSettingsDialog = false }) {
+                    Text("Close")
+                }
+            }
+        )
+    }
+    
+    // Sync dialog
+    if (showSyncDialog) {
+        val context = LocalContext.current
+        AlertDialog(
+            onDismissRequest = { showSyncDialog = false },
+            title = { Text("Sync Data") },
+            text = {
+                Column {
+                    Text("Export your data to copy to the web app, or import data from the web app.")
+                    Spacer(Modifier.height(16.dp))
+                    
+                    Text("Export Data", fontWeight = FontWeight.Bold)
+                    Text("Click the button below to copy your current data to clipboard.")
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            val data = viewModel.exportData()
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            val clip = android.content.ClipData.newPlainText("DoWithTime Data", data)
+                            clipboard.setPrimaryClip(clip)
+                            showSyncDialog = false
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Export to Clipboard")
+                    }
+                    
+                    Spacer(Modifier.height(16.dp))
+                    Divider()
+                    Spacer(Modifier.height(16.dp))
+                    
+                    Text("Import Data", fontWeight = FontWeight.Bold)
+                    Text("Paste data from the web app below to import it here.")
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = syncData,
+                        onValueChange = { syncData = it },
+                        label = { Text("Paste web app data here") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 3
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            if (syncData.isNotBlank()) {
+                                val success = viewModel.importData(syncData)
+                                if (success) {
+                                    showSyncDialog = false
+                                    syncData = ""
+                                }
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Import Data")
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { showSyncDialog = false }) {
                     Text("Close")
                 }
             }

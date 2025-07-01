@@ -58,4 +58,13 @@ class TaskRepository(private val taskDao: TaskDao) {
     fun updateIncompleteTasksState(tasks: List<Task>) {
         _incompleteTasksState.value = tasks
     }
+    
+    // Sync methods
+    suspend fun deleteAllTasks() {
+        taskDao.deleteAllTasks()
+    }
+    
+    suspend fun deleteAllTaskLists() {
+        taskDao.deleteAllTaskLists()
+    }
 } 

@@ -50,4 +50,11 @@ interface TaskDao {
     
     @Delete
     suspend fun deleteTaskList(taskList: TaskList)
+    
+    // Sync methods
+    @Query("DELETE FROM tasks")
+    suspend fun deleteAllTasks()
+    
+    @Query("DELETE FROM task_lists")
+    suspend fun deleteAllTaskLists()
 } 
