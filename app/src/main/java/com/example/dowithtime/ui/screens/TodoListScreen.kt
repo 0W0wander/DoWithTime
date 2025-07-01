@@ -4,11 +4,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.gestures.detectDragGestures
+
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
@@ -28,7 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
+
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
@@ -56,8 +57,7 @@ import androidx.compose.ui.graphics.toArgb
 import kotlinx.coroutines.launch
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInWindow
+
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -70,6 +70,7 @@ fun TodoListScreen(
     val taskLists by viewModel.taskLists.collectAsState()
     val currentListId by viewModel.currentListId.collectAsState()
     val wasInDailyList by viewModel.wasInDailyList.collectAsState()
+    val copiedTasks by viewModel.copiedTasks.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
     var editingTask by remember { mutableStateOf<Task?>(null) }
@@ -79,6 +80,8 @@ fun TodoListScreen(
     var renameListValue by remember { mutableStateOf(TextFieldValue("")) }
     var showAddListDialog by remember { mutableStateOf(false) }
     var newListName by remember { mutableStateOf(TextFieldValue("")) }
+    var showMoveTasksDialog by remember { mutableStateOf(false) }
+    var showPasteDialog by remember { mutableStateOf(false) }
 
     // Dailies selection state
     var dailiesSelected by remember { mutableStateOf(wasInDailyList) }
@@ -95,21 +98,7 @@ fun TodoListScreen(
     // Filter tasks for Dailies or selected list
     val filteredTasks = if (dailiesSelected) dailyTasks else tasks
 
-    // Drag state
-    var draggedItemId by remember { mutableStateOf<Int?>(null) }
-    var dragOffset by remember { mutableStateOf(0f) }
-    var hoveredIndex by remember { mutableStateOf<Int?>(null) }
-    var originalDragIndex by remember { mutableStateOf<Int?>(null) }
-    // Track item positions (top..bottom in window)
-    val itemPositions = remember { mutableStateMapOf<Int, IntRange>() }
 
-    // Reset drag state whenever the list changes (e.g., after reorder)
-    LaunchedEffect(filteredTasks) {
-        draggedItemId = null
-        dragOffset = 0f
-        hoveredIndex = null
-        originalDragIndex = null
-    }
 
     var showSettingsDialog by remember { mutableStateOf(false) }
     var selectedAudioFile by remember { mutableStateOf("") }
@@ -136,16 +125,29 @@ fun TodoListScreen(
                     fontSize = 18.sp,
                     modifier = Modifier.padding(16.dp)
                 )
-                NavigationDrawerItem(
-                    label = { Text("Dailies", fontWeight = if (dailiesSelected) FontWeight.Bold else FontWeight.Normal) },
-                    selected = dailiesSelected,
-                    onClick = {
-                        dailiesSelected = true
-                        viewModel.setWasInDailyList(true)
-                        scope.launch { drawerState.close() }
-                    },
-                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    NavigationDrawerItem(
+                        label = { Text("Dailies", fontWeight = if (dailiesSelected) FontWeight.Bold else FontWeight.Normal) },
+                        selected = dailiesSelected,
+                        onClick = {
+                            dailiesSelected = true
+                            viewModel.setWasInDailyList(true)
+                            scope.launch { drawerState.close() }
+                        },
+                        modifier = Modifier.weight(1f)
+                    )
+                    IconButton(
+                        onClick = { 
+                            viewModel.copyDailyTasks()
+                            scope.launch { drawerState.close() }
+                        }
+                    ) {
+                        Icon(Icons.Default.MoreVert, contentDescription = "Copy Dailies", modifier = Modifier.size(16.dp))
+                    }
+                }
                 Divider(modifier = Modifier.padding(vertical = 8.dp))
                 // User lists
                 Text(
@@ -155,34 +157,47 @@ fun TodoListScreen(
                     modifier = Modifier.padding(start = 16.dp, bottom = 8.dp)
                 )
                 taskLists.forEach { list ->
-                    NavigationDrawerItem(
-                        label = {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(list.name, fontWeight = if (!dailiesSelected && list.id == currentListId) FontWeight.Bold else FontWeight.Normal)
-                                Spacer(Modifier.width(8.dp))
-                                IconButton(onClick = {
-                                    renameListId = list.id
-                                    renameListValue = TextFieldValue(list.name)
-                                    showRenameDialog = true
-                                }) {
-                                    Icon(Icons.Default.Edit, contentDescription = "Rename List", modifier = Modifier.size(16.dp))
-                                }
-                                if (taskLists.size > 1) {
-                                    IconButton(onClick = { viewModel.deleteTaskList(list.id) }) {
-                                        Icon(Icons.Default.Delete, contentDescription = "Delete List", modifier = Modifier.size(16.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        NavigationDrawerItem(
+                            label = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(list.name, fontWeight = if (!dailiesSelected && list.id == currentListId) FontWeight.Bold else FontWeight.Normal)
+                                    Spacer(Modifier.width(8.dp))
+                                    IconButton(onClick = {
+                                        renameListId = list.id
+                                        renameListValue = TextFieldValue(list.name)
+                                        showRenameDialog = true
+                                    }) {
+                                        Icon(Icons.Default.Edit, contentDescription = "Rename List", modifier = Modifier.size(16.dp))
+                                    }
+                                    if (taskLists.size > 1) {
+                                        IconButton(onClick = { viewModel.deleteTaskList(list.id) }) {
+                                            Icon(Icons.Default.Delete, contentDescription = "Delete List", modifier = Modifier.size(16.dp))
+                                        }
                                     }
                                 }
+                            },
+                            selected = !dailiesSelected && list.id == currentListId,
+                            onClick = {
+                                dailiesSelected = false
+                                viewModel.setWasInDailyList(false)
+                                viewModel.selectList(list.id)
+                                scope.launch { drawerState.close() }
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
+                        IconButton(
+                            onClick = { 
+                                viewModel.copyTasksFromList(list.id)
+                                scope.launch { drawerState.close() }
                             }
-                        },
-                        selected = !dailiesSelected && list.id == currentListId,
-                        onClick = {
-                            dailiesSelected = false
-                            viewModel.setWasInDailyList(false)
-                            viewModel.selectList(list.id)
-                            scope.launch { drawerState.close() }
-                        },
-                        modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
-                    )
+                        ) {
+                            Icon(Icons.Default.MoreVert, contentDescription = "Copy List", modifier = Modifier.size(16.dp))
+                        }
+                    }
                 }
                 // Add List button
                 Spacer(Modifier.height(16.dp))
@@ -200,6 +215,21 @@ fun TodoListScreen(
                     Text("Add New List")
                 }
                 Spacer(Modifier.height(16.dp))
+                // Move Tasks button
+                Button(
+                    onClick = { showMoveTasksDialog = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                    )
+                ) {
+                    Icon(Icons.Default.MoreVert, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Move Tasks")
+                }
+                Spacer(modifier = Modifier.height(16.dp))
                 // Settings button
                 Button(
                     onClick = { showSettingsDialog = true },
@@ -232,6 +262,11 @@ fun TodoListScreen(
                         }
                     },
                     actions = {
+                        if (copiedTasks.isNotEmpty()) {
+                            IconButton(onClick = { showPasteDialog = true }) {
+                                Icon(Icons.Default.MoreVert, contentDescription = "Paste ${copiedTasks.size} Tasks")
+                            }
+                        }
                         IconButton(onClick = { showAddDialog = true }) {
                             Icon(Icons.Default.Add, contentDescription = "Add Task")
                         }
@@ -284,9 +319,6 @@ fun TodoListScreen(
                                 task = task,
                                 index = index,
                                 totalTasks = filteredTasks.size,
-                                isDragging = draggedItemId == task.id,
-                                dragOffset = if (draggedItemId == task.id) dragOffset else 0f,
-                                isHovered = hoveredIndex == index,
                                 onDelete = { viewModel.deleteTask(task) },
                                 onComplete = { 
                                     if (task.isDaily) {
@@ -300,43 +332,7 @@ fun TodoListScreen(
                                     editingTaskPosition = index
                                     showEditDialog = true
                                 },
-                                onToggleDaily = { viewModel.toggleDailyTask(task) },
-                                modifier = Modifier.onGloballyPositioned { coordinates ->
-                                    val position = coordinates.positionInWindow().y.toInt()
-                                    val height = coordinates.size.height
-                                    itemPositions[task.id] = position until (position + height)
-                                },
-                                onDragStart = { offset ->
-                                    val actualIndex = filteredTasks.indexOfFirst { it.id == task.id }
-                                    draggedItemId = task.id
-                                    dragOffset = 0f
-                                    hoveredIndex = null
-                                    originalDragIndex = actualIndex
-                                },
-                                onDrag = { change, dragAmount ->
-                                    if (draggedItemId == task.id && originalDragIndex != null) {
-                                        dragOffset += dragAmount.y
-                                        val pointerY = change.position.y.toInt() + itemPositions[task.id]?.first.orZero()
-                                        val hoveredTaskId = itemPositions.entries.firstOrNull { (_, range) ->
-                                            pointerY in range
-                                        }?.key
-                                        val newHoveredIndex = hoveredTaskId?.let { filteredTasks.indexOfFirst { it2 -> it2.id == it } }?.takeIf { it != -1 && it != originalDragIndex }
-                                        if (newHoveredIndex != null) {
-                                            // Perform reorder immediately
-                                            viewModel.reorderTask(originalDragIndex!!, newHoveredIndex)
-                                            // Update drag state for continued dragging
-                                            originalDragIndex = newHoveredIndex
-                                            dragOffset = 0f
-                                        }
-                                        hoveredIndex = newHoveredIndex
-                                    }
-                                },
-                                onDragEnd = {
-                                    draggedItemId = null
-                                    dragOffset = 0f
-                                    hoveredIndex = null
-                                    originalDragIndex = null
-                                }
+                                onToggleDaily = { viewModel.toggleDailyTask(task) }
                             )
                         }
                     }
@@ -513,6 +509,38 @@ fun TodoListScreen(
             }
         )
     }
+    
+    // Move Tasks dialog
+    if (showMoveTasksDialog) {
+        MoveTasksDialog(
+            tasks = if (dailiesSelected) dailyTasks else tasks,
+            onDismiss = { showMoveTasksDialog = false },
+            onMoveTasks = { selectedTasks, targetPosition ->
+                if (dailiesSelected) {
+                    viewModel.insertDailyTasksAtPosition(selectedTasks, targetPosition)
+                } else {
+                    viewModel.insertTasksAtPosition(selectedTasks, targetPosition)
+                }
+                showMoveTasksDialog = false
+            }
+        )
+    }
+    
+    // Paste Tasks dialog
+    if (showPasteDialog) {
+        PasteTasksDialog(
+            copiedTasks = copiedTasks,
+            onDismiss = { showPasteDialog = false },
+            onPasteTasks = { targetPosition ->
+                viewModel.pasteTasksAtPosition(targetPosition)
+                showPasteDialog = false
+            },
+            onClearCopiedTasks = {
+                viewModel.clearCopiedTasks()
+                showPasteDialog = false
+            }
+        )
+    }
 }
 
 @Composable
@@ -520,17 +548,11 @@ fun TaskItem(
     task: Task,
     index: Int,
     totalTasks: Int,
-    isDragging: Boolean,
-    dragOffset: Float,
-    isHovered: Boolean,
     onDelete: () -> Unit,
     onComplete: () -> Unit,
     onEdit: () -> Unit,
     onToggleDaily: () -> Unit,
-    modifier: Modifier = Modifier,
-    onDragStart: (Offset) -> Unit,
-    onDrag: (androidx.compose.ui.input.pointer.PointerInputChange, Offset) -> Unit,
-    onDragEnd: () -> Unit
+    modifier: Modifier = Modifier
 ) {
     // Determine if this is a completed daily task
     val isCompletedDaily = task.isDaily && task.completedToday
@@ -539,27 +561,11 @@ fun TaskItem(
         modifier = modifier
             .fillMaxWidth()
             .graphicsLayer {
-                translationY = when {
-                    isDragging -> dragOffset
-                    isHovered -> 8f
-                    else -> 0f
-                }
-                alpha = if (isDragging) 0.5f else if (isCompletedDaily) 0.6f else 1f
-            }
-            .pointerInput(Unit) {
-                detectDragGestures(
-                    onDragStart = onDragStart,
-                    onDragEnd = onDragEnd,
-                    onDrag = onDrag
-                )
+                alpha = if (isCompletedDaily) 0.6f else 1f
             }
             .clickable { onEdit() },
         colors = CardDefaults.cardColors(
-            containerColor = when {
-                isHovered -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.15f)
-                isCompletedDaily -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                else -> MaterialTheme.colorScheme.surface
-            }
+            containerColor = if (isCompletedDaily) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f) else MaterialTheme.colorScheme.surface
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         shape = RoundedCornerShape(8.dp)
@@ -612,14 +618,6 @@ fun TaskItem(
                         fontSize = 13.sp,
                         color = if (isCompletedDaily) MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f) else MaterialTheme.colorScheme.onSurfaceVariant,
                         fontWeight = FontWeight.Medium
-                    )
-                }
-                if (isDragging) {
-                    Text(
-                        text = "offset: ${dragOffset.toInt()}px",
-                        fontSize = 11.sp,
-                        color = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.padding(top = 2.dp)
                     )
                 }
             }
@@ -1265,4 +1263,335 @@ private fun formatDuration(durationSeconds: Int): String {
     }
 }
 
-private fun Int?.orZero() = this ?: 0 
+@Composable
+fun MoveTasksDialog(
+    tasks: List<Task>,
+    onDismiss: () -> Unit,
+    onMoveTasks: (List<Task>, Int) -> Unit
+) {
+    var selectedTasks by remember { mutableStateOf(setOf<Int>()) }
+    var targetPosition by remember { mutableStateOf(TextFieldValue("1")) }
+    var positionError by remember { mutableStateOf(false) }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { 
+            Text(
+                "Move Tasks",
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.padding(vertical = 8.dp)
+            ) {
+                Text(
+                    text = "Select tasks to move:",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+                
+                // Task selection list
+                LazyColumn(
+                    modifier = Modifier
+                        .heightIn(max = 200.dp)
+                        .fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    items(tasks) { task ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable {
+                                    selectedTasks = if (selectedTasks.contains(task.id)) {
+                                        selectedTasks - task.id
+                                    } else {
+                                        selectedTasks + task.id
+                                    }
+                                }
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Checkbox(
+                                checked = selectedTasks.contains(task.id),
+                                onCheckedChange = { checked ->
+                                    selectedTasks = if (checked) {
+                                        selectedTasks + task.id
+                                    } else {
+                                        selectedTasks - task.id
+                                    }
+                                }
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = task.title,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = formatDuration(task.durationSeconds),
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Text(
+                    text = "Move to position:",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                
+                OutlinedTextField(
+                    value = targetPosition,
+                    onValueChange = { 
+                        targetPosition = it.copy(text = it.text.filter { char -> char.isDigit() })
+                        positionError = false
+                    },
+                    label = { Text("Position (1, 2, 3, etc.)") },
+                    isError = positionError,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = Color.Transparent,
+                        focusedLabelColor = MaterialTheme.colorScheme.primary
+                    )
+                )
+                
+                if (positionError) {
+                    Text(
+                        text = "Please enter a valid position (1 or higher)",
+                        color = ErrorRed,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (selectedTasks.isEmpty()) {
+                        return@Button
+                    }
+                    
+                    val positionInt = targetPosition.text.toIntOrNull() ?: 0
+                    if (positionInt <= 0) {
+                        positionError = true
+                        return@Button
+                    }
+                    
+                    val selectedTaskList = tasks.filter { it.id in selectedTasks }
+                    onMoveTasks(selectedTaskList, positionInt - 1)
+                },
+                enabled = selectedTasks.isNotEmpty(),
+                modifier = Modifier
+                    .background(
+                        brush = PrimaryGradient,
+                        shape = RoundedCornerShape(8.dp)
+                    ),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.Transparent
+                ),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
+            ) {
+                Text(
+                    "Move ${selectedTasks.size} Task${if (selectedTasks.size != 1) "s" else ""}",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            ) {
+                Text(
+                    "Cancel",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium
+                )
+            }
+        }
+    )
+}
+
+@Composable
+fun PasteTasksDialog(
+    copiedTasks: List<Task>,
+    onDismiss: () -> Unit,
+    onPasteTasks: (Int) -> Unit,
+    onClearCopiedTasks: () -> Unit
+) {
+    var targetPosition by remember { mutableStateOf(TextFieldValue("1")) }
+    var positionError by remember { mutableStateOf(false) }
+    
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { 
+            Text(
+                "Paste Tasks",
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+        },
+        text = {
+            Column(
+                modifier = Modifier.padding(vertical = 8.dp)
+            ) {
+                Text(
+                    text = "Copied ${copiedTasks.size} task${if (copiedTasks.size != 1) "s" else ""}:",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+                
+                // Show copied tasks
+                LazyColumn(
+                    modifier = Modifier
+                        .heightIn(max = 150.dp)
+                        .fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    items(copiedTasks) { task ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = task.title,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = formatDuration(task.durationSeconds),
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+                }
+                
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Text(
+                    text = "Paste at position:",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                
+                OutlinedTextField(
+                    value = targetPosition,
+                    onValueChange = { 
+                        targetPosition = it.copy(text = it.text.filter { char -> char.isDigit() })
+                        positionError = false
+                    },
+                    label = { Text("Position (1, 2, 3, etc.)") },
+                    isError = positionError,
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                        unfocusedBorderColor = Color.Transparent,
+                        focusedLabelColor = MaterialTheme.colorScheme.primary
+                    )
+                )
+                
+                if (positionError) {
+                    Text(
+                        text = "Please enter a valid position (1 or higher)",
+                        color = ErrorRed,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    val positionInt = targetPosition.text.toIntOrNull() ?: 0
+                    if (positionInt <= 0) {
+                        positionError = true
+                        return@Button
+                    }
+                    onPasteTasks(positionInt - 1)
+                },
+                modifier = Modifier
+                    .background(
+                        brush = PrimaryGradient,
+                        shape = RoundedCornerShape(8.dp)
+                    ),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color.Transparent
+                ),
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp)
+            ) {
+                Text(
+                    "Paste Tasks",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
+        },
+        dismissButton = {
+            Row {
+                TextButton(
+                    onClick = onClearCopiedTasks,
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = ErrorRed
+                    )
+                ) {
+                    Text(
+                        "Clear",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+                TextButton(
+                    onClick = onDismiss,
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                ) {
+                    Text(
+                        "Cancel",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                }
+            }
+        }
+    )
+}
+
+ 

@@ -11,6 +11,7 @@ import com.example.dowithtime.service.TimerService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 
@@ -53,6 +54,9 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     
     private val _wasInDailyList = MutableStateFlow(false)
     val wasInDailyList: StateFlow<Boolean> = _wasInDailyList.asStateFlow()
+    
+    private val _copiedTasks = MutableStateFlow<List<Task>>(emptyList())
+    val copiedTasks: StateFlow<List<Task>> = _copiedTasks.asStateFlow()
     
     init {
         val database = AppDatabase.getDatabase(application)
@@ -177,32 +181,51 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     
-    fun reorderTasks(fromIndex: Int, toIndex: Int) {
+    fun insertTasksAtPosition(tasksToInsert: List<Task>, targetPosition: Int) {
         viewModelScope.launch {
-            val taskList = _tasks.value.toMutableList()
-            // Ensure indices are valid
-            if (fromIndex < 0 || fromIndex >= taskList.size || 
-                toIndex < 0 || toIndex >= taskList.size || fromIndex == toIndex) {
-                return@launch
-            }
-            val movedTask = taskList.removeAt(fromIndex)
-            taskList.add(toIndex, movedTask)
-            // Update order for all tasks
-            taskList.forEachIndexed { index, task ->
+            val currentTasks = _tasks.value.toMutableList()
+            val insertIndex = targetPosition.coerceIn(0, currentTasks.size)
+            
+            // Remove the tasks to insert from their current positions
+            val taskIdsToInsert = tasksToInsert.map { it.id }
+            currentTasks.removeAll { it.id in taskIdsToInsert }
+            
+            // Insert the tasks at the target position
+            currentTasks.addAll(insertIndex, tasksToInsert)
+            
+            // Update all task orders to be sequential
+            currentTasks.forEachIndexed { index, task ->
                 repository.updateTaskOrder(task.id, index)
             }
-            // Force refresh the tasks for the current list to get a new list reference
+            
+            // Force refresh the tasks for the current list
             refreshTasksForCurrentList()
         }
     }
     
-    fun reorderTask(fromIndex: Int, toIndex: Int) {
-        // Only reorder if indices are valid and different
-        if (fromIndex != toIndex && fromIndex >= 0 && toIndex >= 0 && 
-            fromIndex < _tasks.value.size && toIndex < _tasks.value.size) {
-            reorderTasks(fromIndex, toIndex)
+    fun insertDailyTasksAtPosition(tasksToInsert: List<Task>, targetPosition: Int) {
+        viewModelScope.launch {
+            val currentDailyTasks = _dailyTasks.value.toMutableList()
+            val insertIndex = targetPosition.coerceIn(0, currentDailyTasks.size)
+            
+            // Remove the tasks to insert from their current positions
+            val taskIdsToInsert = tasksToInsert.map { it.id }
+            currentDailyTasks.removeAll { it.id in taskIdsToInsert }
+            
+            // Insert the tasks at the target position
+            currentDailyTasks.addAll(insertIndex, tasksToInsert)
+            
+            // Update all task orders to be sequential
+            currentDailyTasks.forEachIndexed { index, task ->
+                repository.updateTaskOrder(task.id, index)
+            }
+            
+            // Force refresh the daily tasks
+            refreshDailyTasks()
         }
     }
+    
+
     
     fun setTimerService(service: TimerService) {
         timerService = service
@@ -411,6 +434,38 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     
     fun setWasInDailyList(wasInDaily: Boolean) {
         _wasInDailyList.value = wasInDaily
+    }
+    
+    fun copyTasksFromList(listId: Int) {
+        viewModelScope.launch {
+            val tasksFromList = repository.getIncompleteTasksByList(listId).first()
+            _copiedTasks.value = tasksFromList
+        }
+    }
+    
+    fun copyDailyTasks() {
+        viewModelScope.launch {
+            _copiedTasks.value = _dailyTasks.value
+        }
+    }
+    
+    fun pasteTasksAtPosition(targetPosition: Int) {
+        viewModelScope.launch {
+            val tasksToPaste = _copiedTasks.value
+            if (tasksToPaste.isNotEmpty()) {
+                if (_wasInDailyList.value) {
+                    insertDailyTasksAtPosition(tasksToPaste, targetPosition)
+                } else {
+                    insertTasksAtPosition(tasksToPaste, targetPosition)
+                }
+                // Clear copied tasks after pasting
+                _copiedTasks.value = emptyList()
+            }
+        }
+    }
+    
+    fun clearCopiedTasks() {
+        _copiedTasks.value = emptyList()
     }
     fun renameList(listId: Int, newName: String) {
         viewModelScope.launch {
