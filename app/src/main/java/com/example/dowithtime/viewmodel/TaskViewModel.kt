@@ -416,6 +416,60 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     
+    fun insertTasksToTargetList(tasksToInsert: List<Task>, targetListId: Int, targetPosition: Int) {
+        viewModelScope.launch {
+            // Get the current tasks from the target list
+            val targetListTasks = repository.getIncompleteTasksByList(targetListId).first().toMutableList()
+            val insertIndex = targetPosition.coerceIn(0, targetListTasks.size)
+            
+            // Create new tasks with new IDs and the target list ID
+            val newTasks = tasksToInsert.map { originalTask ->
+                originalTask.copy(
+                    id = 0, // Let Room auto-generate new IDs
+                    listId = targetListId,
+                    order = 0 // Will be set properly below
+                )
+            }
+            
+            // Insert the new tasks into the database
+            newTasks.forEach { task ->
+                repository.insertTask(task)
+            }
+            
+            // Get the updated list of tasks from the target list
+            val updatedTargetListTasks = repository.getIncompleteTasksByList(targetListId).first().toMutableList()
+            
+            // Reorder all tasks to put the new tasks at the target position
+            val tasksToReorder = mutableListOf<Task>()
+            
+            // Add tasks before the insert position
+            tasksToReorder.addAll(updatedTargetListTasks.take(insertIndex))
+            
+            // Add the new tasks at the target position
+            tasksToReorder.addAll(newTasks)
+            
+            // Add tasks after the insert position (excluding the new tasks we just added)
+            val existingTasksAfterPosition = updatedTargetListTasks.drop(insertIndex).filter { existingTask ->
+                !newTasks.any { newTask -> newTask.title == existingTask.title && newTask.durationSeconds == existingTask.durationSeconds }
+            }
+            tasksToReorder.addAll(existingTasksAfterPosition)
+            
+            // Update all task orders to be sequential
+            tasksToReorder.forEachIndexed { index, task ->
+                repository.updateTaskOrder(task.id, index)
+            }
+            
+            // If the target list is the current list, refresh the current list's tasks
+            if (targetListId == _currentListId.value) {
+                refreshTasksForCurrentList(targetListId)
+            }
+            
+            uploadToCloud()
+        }
+    }
+    
+    private var nextTaskReceiver: android.content.BroadcastReceiver? = null
+    
     fun setTimerService(service: TimerService) {
         timerService = service
         
@@ -463,6 +517,19 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 _transitionTime.value = time
             }
         }
+        
+        // Register broadcast receiver for next task notifications from TimerService
+        val filter = android.content.IntentFilter("com.example.dowithtime.NEXT_TASK")
+        nextTaskReceiver = object : android.content.BroadcastReceiver() {
+            override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
+                if (intent?.action == "com.example.dowithtime.NEXT_TASK") {
+                    viewModelScope.launch {
+                        nextTask()
+                    }
+                }
+            }
+        }
+        getApplication<Application>().registerReceiver(nextTaskReceiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED)
     }
     
     fun startCurrentTask() {
@@ -659,9 +726,9 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 if (isTargetDaily) {
                     insertDailyTasksAtPosition(tasksToPaste, targetPosition)
                 } else {
-                    // For regular lists, we need to handle the list assignment
+                    // For regular lists, we need to handle the list assignment properly
                     val tasksWithNewList = tasksToPaste.map { it.copy(listId = targetListId) }
-                    insertTasksAtPosition(tasksWithNewList, targetPosition)
+                    insertTasksToTargetList(tasksWithNewList, targetListId, targetPosition)
                 }
                 uploadToCloud()
             }
@@ -736,6 +803,15 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 refreshTasksForCurrentList(_currentListId.value)
             }
             uploadToCloud()
+        }
+    }
+    
+    override fun onCleared() {
+        super.onCleared()
+        // Unregister broadcast receiver
+        nextTaskReceiver?.let { receiver ->
+            getApplication<Application>().unregisterReceiver(receiver)
+            nextTaskReceiver = null
         }
     }
 }

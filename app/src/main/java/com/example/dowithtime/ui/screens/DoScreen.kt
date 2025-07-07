@@ -33,6 +33,20 @@ fun DoScreen(
     val showAlarm by viewModel.showAlarm.collectAsState()
     val isTransitioning by viewModel.isTransitioning.collectAsState()
     val transitionTime by viewModel.transitionTime.collectAsState()
+    val tasks by viewModel.tasks.collectAsState() // <-- add this line
+    
+    // Get the current list ID to force refresh when list changes
+    val currentListId by viewModel.currentListId.collectAsState()
+    
+    // Compute the next task for the transition screen
+    val nextTask = remember(currentTask, tasks, isTransitioning, currentListId) {
+        val currentTaskValue = currentTask
+        if (isTransitioning && currentTaskValue != null) {
+            // Show the first task from the current list during transition
+            // Use the current list's tasks, not the stale tasks state
+            tasks.firstOrNull()
+        } else null
+    }
     
     // Double-click detection for skipping transition
     var lastClickTime by remember { mutableStateOf(0L) }
@@ -49,6 +63,13 @@ fun DoScreen(
     // Refresh current task when screen is displayed
     LaunchedEffect(Unit) {
         viewModel.refreshCurrentTask()
+    }
+    
+    // Force refresh tasks when transition starts to ensure we have the correct list
+    LaunchedEffect(isTransitioning) {
+        if (isTransitioning) {
+            viewModel.refreshTasksForCurrentList()
+        }
     }
     
     // Show alarm screen when time runs out
@@ -76,7 +97,36 @@ fun DoScreen(
         )
         Spacer(modifier = Modifier.height(16.dp))
         // Current task info
-        currentTask?.let { task ->
+        if (isTransitioning && nextTask != null) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Text(
+                    text = "Next Task",
+                    fontSize = 15.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = nextTask.title,
+                    fontSize = 32.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = formatDuration(nextTask.durationSeconds),
+                    fontSize = 17.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
+                )
+            }
+        } else currentTask?.let { task ->
             Column(
                 modifier = Modifier
                     .fillMaxWidth()

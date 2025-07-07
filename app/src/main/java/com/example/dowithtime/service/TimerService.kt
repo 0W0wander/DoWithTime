@@ -168,6 +168,10 @@ class TimerService : Service() {
     
     private fun nextTask() {
         stopAlarm()
+        // Send broadcast to notify ViewModel to handle next task
+        val intent = Intent("com.example.dowithtime.NEXT_TASK")
+        sendBroadcast(intent)
+        
         if (_isTransitioning.value) {
             // If already transitioning, skip the transition entirely
             skipTransition()
