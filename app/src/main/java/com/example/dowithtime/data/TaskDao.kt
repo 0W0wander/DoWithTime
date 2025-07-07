@@ -8,13 +8,13 @@ interface TaskDao {
     @Query("SELECT * FROM tasks ORDER BY `order` ASC")
     fun getAllTasks(): Flow<List<Task>>
     
-    @Query("SELECT * FROM tasks WHERE isCompleted = 0 ORDER BY `order` ASC")
+    @Query("SELECT * FROM tasks WHERE is_completed = 0 ORDER BY `order` ASC")
     fun getIncompleteTasks(): Flow<List<Task>>
     
-    @Query("SELECT * FROM tasks WHERE listId = :listId AND isCompleted = 0 ORDER BY `order` ASC")
+    @Query("SELECT * FROM tasks WHERE list_id = :listId AND is_completed = 0 ORDER BY `order` ASC")
     fun getIncompleteTasksByList(listId: Int): Flow<List<Task>>
     
-    @Query("SELECT * FROM tasks WHERE isDaily = 1 ORDER BY `order` ASC")
+    @Query("SELECT * FROM tasks WHERE is_daily = 1 ORDER BY `order` ASC")
     fun getAllDailyTasks(): Flow<List<Task>>
     
     @Insert
@@ -29,13 +29,13 @@ interface TaskDao {
     @Query("UPDATE tasks SET `order` = :newOrder WHERE id = :taskId")
     suspend fun updateTaskOrder(taskId: Int, newOrder: Int)
     
-    @Query("UPDATE tasks SET isCompleted = 1 WHERE id = :taskId")
+    @Query("UPDATE tasks SET is_completed = 1 WHERE id = :taskId")
     suspend fun markTaskCompleted(taskId: Int)
     
-    @Query("UPDATE tasks SET completedToday = 1 WHERE id = :taskId")
+    @Query("UPDATE tasks SET completed_today = 1 WHERE id = :taskId")
     suspend fun markDailyTaskCompleted(taskId: Int)
     
-    @Query("UPDATE tasks SET completedToday = 0 WHERE isDaily = 1")
+    @Query("UPDATE tasks SET completed_today = 0 WHERE is_daily = 1")
     suspend fun resetDailyTaskCompletion()
     
     // TaskList methods
@@ -57,4 +57,11 @@ interface TaskDao {
     
     @Query("DELETE FROM task_lists")
     suspend fun deleteAllTaskLists()
+    
+    // Bulk insert methods for sync
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAllTasks(tasks: List<Task>)
+    
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertAllTaskLists(taskLists: List<TaskList>)
 } 

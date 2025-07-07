@@ -3,6 +3,7 @@ package com.example.dowithtime.data
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 
 class TaskRepository(private val taskDao: TaskDao) {
     val allTasks: Flow<List<Task>> = taskDao.getAllTasks()
@@ -66,5 +67,26 @@ class TaskRepository(private val taskDao: TaskDao) {
     
     suspend fun deleteAllTaskLists() {
         taskDao.deleteAllTaskLists()
+    }
+    
+    // Additional methods needed by ViewModel
+    suspend fun getAllTasks(): List<Task> {
+        return taskDao.getAllTasks().first()
+    }
+    
+    suspend fun clearAllTasks() {
+        taskDao.deleteAllTasks()
+    }
+    
+    suspend fun clearAllTaskLists() {
+        taskDao.deleteAllTaskLists()
+    }
+    
+    suspend fun insertAllTasks(tasks: List<Task>) {
+        taskDao.insertAllTasks(tasks)
+    }
+    
+    suspend fun insertAllTaskLists(taskLists: List<TaskList>) {
+        taskDao.insertAllTaskLists(taskLists)
     }
 } 

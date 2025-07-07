@@ -1,34 +1,29 @@
 export interface Task {
-  id: number;
+  id: string;
   title: string;
   durationSeconds: number;
-  isCompleted: boolean;
+  completed: boolean;
   order: number;
-  isDaily: boolean;
-  listId: number;
-  completedToday: boolean;
 }
 
 export interface TaskList {
-  id: number;
+  id: string;
   name: string;
-}
-
-export interface TimerState {
-  isRunning: boolean;
-  isPaused: boolean;
-  timeRemaining: number;
-  currentTask: Task | null;
-  showAlarm: boolean;
-  isTransitioning: boolean;
-  transitionTime: number;
+  tasks: Task[];
 }
 
 export interface AppState {
-  tasks: Task[];
   dailyTasks: Task[];
   taskLists: TaskList[];
-  currentListId: number;
-  wasInDailyList: boolean;
-  timerState: TimerState;
+  currentListId: string | null;
+  isDarkMode: boolean;
+}
+
+export interface TimerState {
+  timeRemaining: number;
+  isRunning: boolean;
+  isPaused: boolean;
+  isTransitioning: boolean;
+  currentTaskIndex: number;
+  tasks: Task[];
 } 

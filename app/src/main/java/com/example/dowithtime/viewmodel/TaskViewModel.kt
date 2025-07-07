@@ -16,9 +16,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.delay
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
+import com.example.dowithtime.data.CloudSync
+import com.example.dowithtime.data.AppData
+import com.example.dowithtime.data.SyncStatus
 
 class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val repository: TaskRepository
+    private val cloudSync: CloudSync
     private val _tasks = MutableStateFlow<List<Task>>(emptyList())
     val tasks: StateFlow<List<Task>> = _tasks.asStateFlow()
     
@@ -51,102 +55,283 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     // Multi-list support
     private val _taskLists = MutableStateFlow<List<TaskList>>(emptyList())
     val taskLists: StateFlow<List<TaskList>> = _taskLists.asStateFlow()
-    private val _currentListId = MutableStateFlow(1)
-    val currentListId: StateFlow<Int> = _currentListId.asStateFlow()
+    private val _currentListId = MutableStateFlow<Int?>(null)
+    val currentListId: StateFlow<Int?> = _currentListId.asStateFlow()
     
     private val _wasInDailyList = MutableStateFlow(false)
     val wasInDailyList: StateFlow<Boolean> = _wasInDailyList.asStateFlow()
     
-
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
+    
+    private val _syncStatus = MutableStateFlow<SyncStatus?>(null)
+    val syncStatus: StateFlow<SyncStatus?> = _syncStatus.asStateFlow()
     
     init {
         val database = AppDatabase.getDatabase(application)
         repository = TaskRepository(database.taskDao())
+        cloudSync = CloudSync(application)
         refreshTaskLists()
-        refreshTasksForCurrentList()
+        // Don't call refreshTasksForCurrentList here as it will be called after loadData() sets the current list ID
         
         // Reset daily task completion at app start
         resetDailyTaskCompletion()
-        
-        viewModelScope.launch {
-            repository.incompleteTasks.collect { taskList ->
-                _tasks.value = taskList
-                repository.updateIncompleteTasksState(taskList)
-                // Update current task if it's null or if the current task is no longer in the list
-                if (_currentTask.value == null || !taskList.contains(_currentTask.value)) {
-                    _currentTask.value = taskList.firstOrNull()
-                }
-            }
-        }
         
         viewModelScope.launch {
             repository.getAllDailyTasks().collect { dailyTaskList ->
                 _dailyTasks.value = dailyTaskList
             }
         }
+        
+        loadData()
+        performAutoSync()
+    }
+    
+    private fun loadData() {
+        viewModelScope.launch {
+            _tasks.value = repository.getAllTasks()
+            _taskLists.value = repository.getAllTaskLists().first()
+            
+            // Set current list to first available list if none is set
+            if (_taskLists.value.isNotEmpty() && _currentListId.value == null) {
+                _currentListId.value = _taskLists.value.first().id
+                // Refresh tasks for the newly set current list
+                refreshTasksForCurrentList(_currentListId.value)
+            }
+        }
+    }
+    
+    private fun performAutoSync() {
+        viewModelScope.launch {
+            _isLoading.value = true
+            try {
+                // Convert local data to web-compatible AppData format
+                val localData = cloudSync.convertToWebFormat(
+                    dailyTasks = repository.getAllTasks(),
+                    taskLists = _taskLists.value,
+                    currentListId = _currentListId.value
+                )
+                
+                // Perform auto-sync
+                val syncResult = cloudSync.autoSync(localData)
+                syncResult.onSuccess { syncedData ->
+                    // Update local data with synced data
+                    updateLocalDataFromCloud(syncedData)
+                }.onFailure { error ->
+                    println("Auto-sync failed: ${error.message}")
+                }
+                
+                // Get sync status
+                val statusResult = cloudSync.getSyncStatus()
+                statusResult.onSuccess { status ->
+                    _syncStatus.value = status
+                }
+            } finally {
+                _isLoading.value = false
+            }
+        }
+    }
+    
+    private suspend fun updateLocalDataFromCloud(cloudData: AppData) {
+        // Convert web data to Android format
+        val (androidTasks, androidTaskLists, currentListId) = cloudSync.convertFromWebFormat(cloudData)
+        
+        // Clear existing data
+        repository.clearAllTasks()
+        repository.clearAllTaskLists()
+        
+        // Insert synced data
+        if (androidTasks.isNotEmpty()) {
+            repository.insertAllTasks(androidTasks)
+        }
+        if (androidTaskLists.isNotEmpty()) {
+            repository.insertAllTaskLists(androidTaskLists)
+        }
+        
+        // Update current list ID
+        _currentListId.value = currentListId
+        
+        // Reload data
+        _tasks.value = repository.getAllTasks()
+        _taskLists.value = repository.getAllTaskLists().first()
+        _dailyTasks.value = repository.getAllDailyTasks().first()
+        
+        // Set current list to first available list if none is set
+        if (_taskLists.value.isNotEmpty() && _currentListId.value == null) {
+            _currentListId.value = _taskLists.value.first().id
+            // Refresh tasks for the newly set current list
+            refreshTasksForCurrentList(_currentListId.value)
+        }
     }
     
     fun addTask(title: String, durationSeconds: Int, isDaily: Boolean = false) {
         viewModelScope.launch {
-            val newOrder = _tasks.value.size
+            // Ensure we have a valid current list ID for non-daily tasks
+            val currentListId = if (isDaily) -1 else {
+                _currentListId.value ?: _taskLists.value.firstOrNull()?.id ?: 1
+            }
+            
             val task = Task(
                 title = title,
                 durationSeconds = durationSeconds,
-                order = newOrder,
+                isCompleted = false,
+                order = if (isDaily) _dailyTasks.value.size else _tasks.value.size,
+                listId = currentListId,
                 isDaily = isDaily
             )
             repository.insertTask(task)
+            if (isDaily) {
+                refreshDailyTasks()
+            } else {
+                // Use the same list ID that was used to create the task
+                refreshTasksForCurrentList(currentListId)
+            }
+            uploadToCloud()
         }
     }
     
     fun updateTask(task: Task) {
         viewModelScope.launch {
             repository.updateTask(task)
-        }
-    }
-    
-    fun updateTaskWithOrder(task: Task, newOrder: Int) {
-        viewModelScope.launch {
-            // First update the task with its new properties
-            repository.updateTask(task)
-            
-            // If this is the current task, update it immediately
-            if (_currentTask.value?.id == task.id) {
-                _currentTask.value = task
-                _timeRemaining.value = task.durationSeconds * 1000L
-                // Update the TimerService with the refreshed task
-                timerService?.updateTask(task)
-            }
-            
-            // Then handle the order change if needed
-            val currentTasks = _tasks.value.toMutableList()
-            val currentIndex = currentTasks.indexOfFirst { it.id == task.id }
-            
-            if (currentIndex != -1) {
-                // Remove the task from its current position
-                currentTasks.removeAt(currentIndex)
-                
-                // Insert it at the new position
-                val insertIndex = newOrder.coerceIn(0, currentTasks.size)
-                currentTasks.add(insertIndex, task.copy(order = newOrder))
-                
-                // Update all task orders to be sequential
-                currentTasks.forEachIndexed { index, t ->
-                    repository.updateTaskOrder(t.id, index)
-                }
-            }
+            // Refresh tasks for the current list after updating
+            refreshTasksForCurrentList(_currentListId.value)
+            uploadToCloud()
         }
     }
     
     fun deleteTask(task: Task) {
         viewModelScope.launch {
             repository.deleteTask(task)
+            // Refresh tasks for the current list after deleting
+            refreshTasksForCurrentList(_currentListId.value)
+            uploadToCloud()
+        }
+    }
+    
+    fun toggleTaskCompletion(task: Task) {
+        viewModelScope.launch {
+            val updatedTask = task.copy(isCompleted = !task.isCompleted)
+            repository.updateTask(updatedTask)
+            // Refresh tasks for the current list after toggling completion
+            refreshTasksForCurrentList(_currentListId.value)
+            uploadToCloud()
+        }
+    }
+    
+    fun addTaskList(name: String) {
+        viewModelScope.launch {
+            val taskList = TaskList(name = name)
+            repository.insertTaskList(taskList)
+            _taskLists.value = repository.getAllTaskLists().first()
+            
+            // If this is the first list, set it as current
+            if (_taskLists.value.size == 1 && _currentListId.value == null) {
+                _currentListId.value = taskList.id
+                refreshTasksForCurrentList(taskList.id)
+            }
+            
+            uploadToCloud()
+        }
+    }
+    
+    fun updateTaskList(taskList: TaskList) {
+        viewModelScope.launch {
+            repository.updateTaskList(taskList)
+            _taskLists.value = repository.getAllTaskLists().first()
+            uploadToCloud()
+        }
+    }
+    
+    fun deleteTaskList(taskList: TaskList) {
+        viewModelScope.launch {
+            repository.deleteTaskList(taskList)
+            _taskLists.value = repository.getAllTaskLists().first()
+            uploadToCloud()
+        }
+    }
+    
+    fun deleteTaskList(listId: Int) {
+        viewModelScope.launch {
+            val taskList = _taskLists.value.find { it.id == listId }
+            taskList?.let { repository.deleteTaskList(it) }
+            _taskLists.value = repository.getAllTaskLists().first()
+            
+            // If we deleted the current list, switch to the first available list
+            if (_currentListId.value == listId) {
+                _currentListId.value = _taskLists.value.firstOrNull()?.id
+                if (_currentListId.value != null) {
+                    refreshTasksForCurrentList(_currentListId.value)
+                }
+            }
+            
+            uploadToCloud()
+        }
+    }
+    
+    fun setCurrentList(listId: Int) {
+        _currentListId.value = listId
+        viewModelScope.launch {
+            uploadToCloud()
+        }
+    }
+    
+    fun getTasksForList(listId: Int): List<Task> {
+        return _tasks.value.filter { it.listId == listId }
+    }
+    
+    fun getCurrentTasks(): List<Task> {
+        return _currentListId.value?.let { listId ->
+            _tasks.value.filter { it.listId == listId }
+        } ?: _tasks.value
+    }
+    
+    fun getCurrentList(): TaskList? {
+        return _currentListId.value?.let { listId ->
+            _taskLists.value.find { it.id == listId }
+        }
+    }
+    
+    private suspend fun uploadToCloud() {
+        val appData = cloudSync.convertToWebFormat(
+            dailyTasks = repository.getAllTasks(),
+            taskLists = _taskLists.value,
+            currentListId = _currentListId.value
+        )
+        cloudSync.uploadToCloud(appData)
+    }
+    
+    fun manualSync() {
+        performAutoSync()
+    }
+    
+    // Export/Import functions for manual sync (keeping existing functionality)
+    suspend fun exportData(): String {
+        val appData = cloudSync.convertToWebFormat(
+            dailyTasks = repository.getAllTasks(),
+            taskLists = _taskLists.value,
+            currentListId = _currentListId.value
+        )
+        return com.google.gson.Gson().toJson(appData)
+    }
+    
+    fun importData(jsonData: String): Boolean {
+        return try {
+            val appData = com.google.gson.Gson().fromJson(jsonData, AppData::class.java)
+            viewModelScope.launch {
+                updateLocalDataFromCloud(appData)
+            }
+            true
+        } catch (e: Exception) {
+            false
         }
     }
     
     fun markTaskCompleted(task: Task) {
         viewModelScope.launch {
             repository.markTaskCompleted(task.id)
+            // Refresh tasks for the current list after marking as completed
+            refreshTasksForCurrentList(_currentListId.value)
+            uploadToCloud()
         }
     }
     
@@ -155,6 +340,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             repository.markDailyTaskCompleted(task.id)
             // Refresh daily tasks to get updated completion status
             refreshDailyTasks()
+            uploadToCloud()
         }
     }
     
@@ -163,6 +349,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             repository.resetDailyTaskCompletion()
             // Refresh daily tasks after resetting completion status
             refreshDailyTasks()
+            uploadToCloud()
         }
     }
     
@@ -179,6 +366,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             repository.updateTask(task.copy(isDaily = !task.isDaily))
             // Refresh daily tasks after toggling daily status
             refreshDailyTasks()
+            uploadToCloud()
         }
     }
     
@@ -200,7 +388,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             }
             
             // Force refresh the tasks for the current list
-            refreshTasksForCurrentList()
+            refreshTasksForCurrentList(_currentListId.value)
+            uploadToCloud()
         }
     }
     
@@ -223,10 +412,9 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             
             // Force refresh the daily tasks
             refreshDailyTasks()
+            uploadToCloud()
         }
     }
-    
-
     
     fun setTimerService(service: TimerService) {
         timerService = service
@@ -263,7 +451,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             service.isTransitioning.collect { transitioning ->
                 _isTransitioning.value = transitioning
-                if (!transitioning) {
+                // Only move to next task if we were actually transitioning (not during initialization)
+                if (!transitioning && _isRunning.value) {
                     // When transition ends, move to next task
                     moveToNextTask()
                 }
@@ -277,14 +466,16 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     }
     
     fun startCurrentTask() {
-        // First refresh the current task to ensure we have the first task
-        refreshCurrentTask()
-        
-        _currentTask.value?.let { task ->
-            // Immediately set the time remaining to the current task's duration
-            _timeRemaining.value = task.durationSeconds * 1000L
-            // Always reset the timer to the current task's duration
-            timerService?.startTask(task)
+        viewModelScope.launch {
+            // First refresh the current task to ensure we have the first task
+            refreshCurrentTask()
+            
+            _currentTask.value?.let { task ->
+                // Immediately set the time remaining to the current task's duration
+                _timeRemaining.value = task.durationSeconds * 1000L
+                // Always reset the timer to the current task's duration
+                timerService?.startTask(task)
+            }
         }
     }
     
@@ -340,6 +531,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     getApplication<Application>().startService(intent)
                 }
+                uploadToCloud()
             }
         }
     }
@@ -375,11 +567,17 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 // Small delay to ensure the task list is updated
                 kotlinx.coroutines.delay(100)
                 moveToNextTask()
+                uploadToCloud()
             }
         }
     }
     
-    private fun moveToNextTask() {
+    private suspend fun moveToNextTask() {
+        // Only proceed if the timer is actually running
+        if (!_isRunning.value) {
+            return
+        }
+        
         // Check if we're working with daily tasks
         val currentTask = _currentTask.value
         val isWorkingWithDailyTasks = currentTask?.isDaily == true
@@ -388,8 +586,13 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             // For daily tasks, find the first uncompleted daily task
             _dailyTasks.value.firstOrNull { !it.completedToday }
         } else {
-            // For regular tasks, find the first incomplete task
-            _tasks.value.firstOrNull()
+            // For regular tasks, find the first incomplete task from the current list
+            // Force refresh the task list to ensure we have the latest data
+            val currentListId = _currentListId.value ?: _taskLists.value.firstOrNull()?.id ?: 1
+            val currentTasks = repository.getIncompleteTasksByList(currentListId).first()
+            // Also update the _tasks.value to keep it in sync
+            _tasks.value = currentTasks
+            currentTasks.firstOrNull()
         }
         
         if (nextTask != null) {
@@ -407,7 +610,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     }
     
     // Method to refresh current task from database
-    fun refreshCurrentTask() {
+    suspend fun refreshCurrentTask() {
         // Check if we should be working with daily tasks based on the remembered state
         val shouldWorkWithDailyTasks = _wasInDailyList.value
         
@@ -415,8 +618,13 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             // For daily tasks, find the first uncompleted daily task
             _dailyTasks.value.firstOrNull { !it.completedToday }
         } else {
-            // For regular tasks, find the first incomplete task
-            repository.incompleteTasksState.value.firstOrNull()
+            // For regular tasks, find the first incomplete task from the current list
+            // Force refresh the task list to ensure we have the latest data
+            val currentListId = _currentListId.value ?: _taskLists.value.firstOrNull()?.id ?: 1
+            val currentTasks = repository.getIncompleteTasksByList(currentListId).first()
+            // Also update the _tasks.value to keep it in sync
+            _tasks.value = currentTasks
+            currentTasks.firstOrNull()
         }
         
         _currentTask.value = firstTask
@@ -430,7 +638,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     
     fun selectList(listId: Int) {
         _currentListId.value = listId
-        refreshTasksForCurrentList()
+        refreshTasksForCurrentList(listId)
     }
     
     fun setWasInDailyList(wasInDaily: Boolean) {
@@ -442,7 +650,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             val tasksToPaste = if (isSourceDaily) {
                 _dailyTasks.value
             } else {
-                repository.getIncompleteTasksByList(sourceListId!!).first()
+                val sourceId = sourceListId ?: return@launch
+                repository.getIncompleteTasksByList(sourceId).first()
             }
             
             if (tasksToPaste.isNotEmpty()) {
@@ -454,6 +663,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                     val tasksWithNewList = tasksToPaste.map { it.copy(listId = targetListId) }
                     insertTasksAtPosition(tasksWithNewList, targetPosition)
                 }
+                uploadToCloud()
             }
         }
     }
@@ -462,13 +672,17 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             val list = _taskLists.value.find { it.id == listId }
             if (list != null) {
                 repository.updateTaskList(list.copy(name = newName))
+                _taskLists.value = repository.getAllTaskLists().first()
+                uploadToCloud()
             }
         }
     }
-    fun refreshTasksForCurrentList() {
+    fun refreshTasksForCurrentList(listId: Int? = null) {
         viewModelScope.launch {
-            repository.getIncompleteTasksByList(_currentListId.value).collect { taskList ->
+            val currentListId = listId ?: _currentListId.value ?: _taskLists.value.firstOrNull()?.id ?: 1
+            repository.getIncompleteTasksByList(currentListId).collect { taskList ->
                 _tasks.value = taskList
+                // Update the incomplete tasks state with the current list's tasks
                 repository.updateIncompleteTasksState(taskList)
                 if (_currentTask.value == null || !taskList.contains(_currentTask.value)) {
                     _currentTask.value = taskList.firstOrNull()
@@ -483,80 +697,45 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
     }
-    fun addTaskList(name: String) {
+    
+    fun updateTaskWithOrder(task: Task, newOrder: Int) {
         viewModelScope.launch {
-            repository.insertTaskList(TaskList(name = name))
-        }
-    }
-    fun updateTaskList(taskList: TaskList) {
-        viewModelScope.launch {
-            repository.updateTaskList(taskList)
-        }
-    }
-    fun deleteTaskList(listId: Int) {
-        viewModelScope.launch {
-            taskLists.value.find { it.id == listId }?.let { repository.deleteTaskList(it) }
-        }
-    }
-
-    // Sync functionality
-    fun exportData(): String {
-        val gson = Gson()
-        val syncData = SyncData(
-            tasks = _tasks.value,
-            dailyTasks = _dailyTasks.value,
-            taskLists = _taskLists.value,
-            currentListId = _currentListId.value,
-            wasInDailyList = _wasInDailyList.value
-        )
-        return gson.toJson(syncData)
-    }
-
-    fun importData(jsonData: String): Boolean {
-        return try {
-            val gson = Gson()
-            val syncData = gson.fromJson(jsonData, SyncData::class.java)
+            // First update the task with its new properties
+            repository.updateTask(task)
             
-            viewModelScope.launch {
-                // Clear existing data
-                repository.deleteAllTasks()
-                repository.deleteAllTaskLists()
-                
-                // Import task lists
-                syncData.taskLists.forEach { taskList ->
-                    repository.insertTaskList(taskList)
-                }
-                
-                // Import tasks
-                syncData.tasks.forEach { task ->
-                    repository.insertTask(task)
-                }
-                
-                // Import daily tasks
-                syncData.dailyTasks.forEach { task ->
-                    repository.insertTask(task)
-                }
-                
-                // Update state
-                _currentListId.value = syncData.currentListId
-                _wasInDailyList.value = syncData.wasInDailyList
-                
-                // Refresh data
-                refreshTaskLists()
-                refreshTasksForCurrentList()
-                refreshDailyTasks()
+            // If this is the current task, update it immediately
+            if (_currentTask.value?.id == task.id) {
+                _currentTask.value = task
+                _timeRemaining.value = task.durationSeconds * 1000L
+                // Update the TimerService with the refreshed task
+                timerService?.updateTask(task)
             }
-            true
-        } catch (e: Exception) {
-            false
+            
+            // Then handle the order change if needed
+            val currentTasks = if (task.isDaily) _dailyTasks.value.toMutableList() else _tasks.value.toMutableList()
+            val currentIndex = currentTasks.indexOfFirst { it.id == task.id }
+            
+            if (currentIndex != -1) {
+                // Remove the task from its current position
+                currentTasks.removeAt(currentIndex)
+                
+                // Insert it at the new position
+                val insertIndex = newOrder.coerceIn(0, currentTasks.size)
+                currentTasks.add(insertIndex, task.copy(order = newOrder))
+                
+                // Update all task orders to be sequential
+                currentTasks.forEachIndexed { index, t ->
+                    repository.updateTaskOrder(t.id, index)
+                }
+            }
+            
+            // Refresh the appropriate task list
+            if (task.isDaily) {
+                refreshDailyTasks()
+            } else {
+                refreshTasksForCurrentList(_currentListId.value)
+            }
+            uploadToCloud()
         }
     }
-
-    data class SyncData(
-        val tasks: List<Task>,
-        val dailyTasks: List<Task>,
-        val taskLists: List<TaskList>,
-        val currentListId: Int,
-        val wasInDailyList: Boolean
-    )
-} 
+}

@@ -5,7 +5,10 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 import android.content.Context
 
-@Database(entities = [Task::class, TaskList::class], version = 5, exportSchema = false)
+@Database(
+    entities = [Task::class, TaskList::class], 
+    version = 6
+)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun taskDao(): TaskDao
     
@@ -20,7 +23,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "dowithtime_database"
                 )
-                .fallbackToDestructiveMigration() // This will delete and recreate the database if schema changes
+                .fallbackToDestructiveMigration()
                 .build()
                 INSTANCE = instance
                 instance

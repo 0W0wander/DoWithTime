@@ -1,47 +1,38 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { Task, TimerState } from '../types';
-import { playAlarmSound, sendNotification, requestNotificationPermission } from '../utils/timer';
+import { useState, useEffect, useCallback } from 'react';
+import { Task } from '../types';
 
 export const useTimer = () => {
-  const [timerState, setTimerState] = useState<TimerState>({
+  const [timerState, setTimerState] = useState({
+    timeRemaining: 0,
     isRunning: false,
     isPaused: false,
-    timeRemaining: 0,
-    currentTask: null,
-    showAlarm: false,
     isTransitioning: false,
-    transitionTime: 10
+    currentTaskIndex: 0,
+    tasks: [] as Task[]
   });
 
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
-  const transitionIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const [intervalId, setIntervalId] = useState<NodeJS.Timeout | null>(null);
 
-  const startTimer = useCallback((task: Task) => {
+  const startTimer = useCallback((tasks: Task[]) => {
+    if (tasks.length === 0) return;
+    
     setTimerState(prev => ({
       ...prev,
-      currentTask: task,
-      timeRemaining: task.durationSeconds * 1000,
+      tasks,
+      currentTaskIndex: 0,
+      timeRemaining: tasks[0].durationSeconds,
       isRunning: true,
       isPaused: false,
-      showAlarm: false,
       isTransitioning: false
     }));
   }, []);
 
   const pauseTimer = useCallback(() => {
-    setTimerState(prev => ({
-      ...prev,
-      isRunning: false,
-      isPaused: true
-    }));
+    setTimerState(prev => ({ ...prev, isRunning: false, isPaused: true }));
   }, []);
 
   const resumeTimer = useCallback(() => {
-    setTimerState(prev => ({
-      ...prev,
-      isRunning: true,
-      isPaused: false
-    }));
+    setTimerState(prev => ({ ...prev, isRunning: true, isPaused: false }));
   }, []);
 
   const stopTimer = useCallback(() => {
@@ -49,138 +40,137 @@ export const useTimer = () => {
       ...prev,
       isRunning: false,
       isPaused: false,
-      timeRemaining: 0,
-      currentTask: null,
-      showAlarm: false,
-      isTransitioning: false
+      isTransitioning: false,
+      timeRemaining: 0
     }));
   }, []);
 
   const resetTimer = useCallback(() => {
+    if (timerState.tasks.length === 0) return;
+    
     setTimerState(prev => ({
       ...prev,
-      timeRemaining: prev.currentTask ? prev.currentTask.durationSeconds * 1000 : 0,
+      timeRemaining: prev.tasks[prev.currentTaskIndex]?.durationSeconds || 0,
       isRunning: false,
       isPaused: false,
-      showAlarm: false,
       isTransitioning: false
     }));
+  }, [timerState.tasks]);
+
+  const nextTask = useCallback(() => {
+    setTimerState(prev => {
+      const nextIndex = prev.currentTaskIndex + 1;
+      if (nextIndex < prev.tasks.length) {
+        return {
+          ...prev,
+          currentTaskIndex: nextIndex,
+          timeRemaining: prev.tasks[nextIndex].durationSeconds,
+          isRunning: true,
+          isPaused: false,
+          isTransitioning: false
+        };
+      } else {
+        // All tasks completed
+        return {
+          ...prev,
+          isRunning: false,
+          isPaused: false,
+          isTransitioning: false,
+          timeRemaining: 0
+        };
+      }
+    });
   }, []);
 
   const skipTransition = useCallback(() => {
-    setTimerState(prev => ({
-      ...prev,
-      isTransitioning: false,
-      transitionTime: 10
-    }));
-  }, []);
-
-  const nextTask = useCallback(() => {
-    setTimerState(prev => ({
-      ...prev,
-      showAlarm: false,
-      isTransitioning: true,
-      transitionTime: 10
-    }));
+    setTimerState(prev => ({ ...prev, isTransitioning: false }));
   }, []);
 
   const stopAlarm = useCallback(() => {
-    setTimerState(prev => ({
-      ...prev,
-      showAlarm: false
-    }));
+    // This would handle alarm stopping logic
+    console.log('Alarm stopped');
   }, []);
 
   // Timer countdown effect
   useEffect(() => {
-    if (timerState.isRunning && timerState.timeRemaining > 0) {
-      intervalRef.current = setInterval(() => {
+    if (timerState.isRunning && !timerState.isPaused && timerState.timeRemaining > 0) {
+      const id = setInterval(() => {
         setTimerState(prev => {
-          const newTimeRemaining = prev.timeRemaining - 1000;
-          
-          if (newTimeRemaining <= 0) {
-            // Timer finished
-            playAlarmSound();
-            sendNotification('Time\'s up!', `Task "${prev.currentTask?.title}" is complete!`);
-            
+          if (prev.timeRemaining <= 1) {
+            // Timer finished, start transition
             return {
               ...prev,
-              timeRemaining: 0,
               isRunning: false,
-              showAlarm: true,
-              isTransitioning: false
+              isTransitioning: true,
+              timeRemaining: 10 // 10 second transition
             };
           }
-          
           return {
             ...prev,
-            timeRemaining: newTimeRemaining
+            timeRemaining: prev.timeRemaining - 1
           };
         });
       }, 1000);
+      setIntervalId(id);
     } else {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
+      if (intervalId) {
+        clearInterval(intervalId);
+        setIntervalId(null);
       }
     }
 
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
+      if (intervalId) {
+        clearInterval(intervalId);
       }
     };
-  }, [timerState.isRunning, timerState.timeRemaining]);
+  }, [timerState.isRunning, timerState.isPaused, timerState.timeRemaining, intervalId]);
 
-  // Transition timer effect
+  // Transition countdown effect
   useEffect(() => {
-    if (timerState.isTransitioning && timerState.transitionTime > 0) {
-      transitionIntervalRef.current = setInterval(() => {
+    if (timerState.isTransitioning && timerState.timeRemaining > 0) {
+      const id = setInterval(() => {
         setTimerState(prev => {
-          const newTransitionTime = prev.transitionTime - 1;
-          
-          if (newTransitionTime <= 0) {
+          if (prev.timeRemaining <= 1) {
+            // Transition finished, move to next task
             return {
               ...prev,
               isTransitioning: false,
-              transitionTime: 10
+              timeRemaining: 0
             };
           }
-          
           return {
             ...prev,
-            transitionTime: newTransitionTime
+            timeRemaining: prev.timeRemaining - 1
           };
         });
       }, 1000);
-    } else {
-      if (transitionIntervalRef.current) {
-        clearInterval(transitionIntervalRef.current);
-        transitionIntervalRef.current = null;
-      }
+      setIntervalId(id);
     }
 
     return () => {
-      if (transitionIntervalRef.current) {
-        clearInterval(transitionIntervalRef.current);
+      if (intervalId) {
+        clearInterval(intervalId);
       }
     };
-  }, [timerState.isTransitioning, timerState.transitionTime]);
-
-  // Request notification permission on mount
-  useEffect(() => {
-    requestNotificationPermission();
-  }, []);
+  }, [timerState.isTransitioning, timerState.timeRemaining, intervalId]);
 
   return {
-    timerState,
+    // Direct properties for easier access
+    currentTaskIndex: timerState.currentTaskIndex,
+    timeRemaining: timerState.timeRemaining,
+    isRunning: timerState.isRunning,
+    isPaused: timerState.isPaused,
+    isTransitioning: timerState.isTransitioning,
+    
+    // Functions
     startTimer,
     pauseTimer,
     resumeTimer,
     stopTimer,
     resetTimer,
-    skipTransition,
     nextTask,
+    skipTransition,
     stopAlarm
   };
 }; 

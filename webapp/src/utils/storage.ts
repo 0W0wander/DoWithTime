@@ -1,10 +1,10 @@
-import { Task, TaskList, AppState } from '../types';
+import { AppState } from '../types';
 
-const STORAGE_KEY = 'dowithtime_data';
+const STORAGE_KEY = 'dowithtime_app_state';
 
-export const saveToStorage = (data: AppState): void => {
+export const saveToStorage = (appState: AppState): void => {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(appState));
   } catch (error) {
     console.error('Failed to save to localStorage:', error);
   }
@@ -14,41 +14,64 @@ export const loadFromStorage = (): AppState => {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored) {
-      return JSON.parse(stored);
+      const parsed = JSON.parse(stored);
+      
+      // Ensure we have the correct structure with additional safety checks
+      return {
+        dailyTasks: Array.isArray(parsed.dailyTasks) ? parsed.dailyTasks : [],
+        taskLists: Array.isArray(parsed.taskLists) ? parsed.taskLists : [],
+        currentListId: parsed.currentListId || null,
+        isDarkMode: Boolean(parsed.isDarkMode)
+      };
     }
   } catch (error) {
     console.error('Failed to load from localStorage:', error);
   }
-  
-  // Return default state if nothing is stored
+
+  // Return default state if nothing is stored or there's an error
   return {
-    tasks: [],
     dailyTasks: [],
-    taskLists: [{ id: 1, name: 'Default List' }],
-    currentListId: 1,
-    wasInDailyList: false,
-    timerState: {
-      isRunning: false,
-      isPaused: false,
-      timeRemaining: 0,
-      currentTask: null,
-      showAlarm: false,
-      isTransitioning: false,
-      transitionTime: 10
-    }
+    taskLists: [],
+    currentListId: null,
+    isDarkMode: false
   };
 };
 
-export const exportData = (): string => {
-  const data = localStorage.getItem(STORAGE_KEY);
-  return data || '';
+export const clearStorage = (): void => {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch (error) {
+    console.error('Failed to clear localStorage:', error);
+  }
 };
 
-export const importData = (data: string): boolean => {
+export const exportData = (): string => {
   try {
-    const parsed = JSON.parse(data);
-    localStorage.setItem(STORAGE_KEY, data);
-    return true;
+    const data = loadFromStorage();
+    return JSON.stringify(data, null, 2);
+  } catch (error) {
+    console.error('Failed to export data:', error);
+    return '';
+  }
+};
+
+export const importData = (jsonData: string): boolean => {
+  try {
+    const data = JSON.parse(jsonData);
+    
+    // Validate the data structure
+    if (data && typeof data === 'object') {
+      const validatedData: AppState = {
+        dailyTasks: Array.isArray(data.dailyTasks) ? data.dailyTasks : [],
+        taskLists: Array.isArray(data.taskLists) ? data.taskLists : [],
+        currentListId: data.currentListId || null,
+        isDarkMode: Boolean(data.isDarkMode)
+      };
+      
+      saveToStorage(validatedData);
+      return true;
+    }
+    return false;
   } catch (error) {
     console.error('Failed to import data:', error);
     return false;

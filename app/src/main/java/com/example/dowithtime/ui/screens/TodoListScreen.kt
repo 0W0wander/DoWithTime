@@ -61,6 +61,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.toArgb
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 
@@ -537,11 +538,13 @@ fun TodoListScreen(
                     Spacer(Modifier.height(8.dp))
                     Button(
                         onClick = {
-                            val data = viewModel.exportData()
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            val clip = android.content.ClipData.newPlainText("DoWithTime Data", data)
-                            clipboard.setPrimaryClip(clip)
-                            showSyncDialog = false
+                            scope.launch {
+                                val data = viewModel.exportData()
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                val clip = android.content.ClipData.newPlainText("DoWithTime Data", data)
+                                clipboard.setPrimaryClip(clip)
+                                showSyncDialog = false
+                            }
                         },
                         modifier = Modifier.fillMaxWidth()
                     ) {

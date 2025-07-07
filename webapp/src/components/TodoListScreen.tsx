@@ -1,342 +1,311 @@
 import React, { useState } from 'react';
 import {
   Box,
-  Button,
   Card,
   CardContent,
-  Chip,
+  Typography,
+  Button,
+  TextField,
   Dialog,
-  DialogActions,
-  DialogContent,
   DialogTitle,
-  Drawer,
-  Fab,
-  IconButton,
+  DialogContent,
+  DialogActions,
   List,
   ListItem,
   ListItemText,
   ListItemSecondaryAction,
-  TextField,
-  Typography,
-  AppBar,
-  Toolbar,
+  IconButton,
+  Checkbox,
+  Fab,
+  Chip,
   Divider,
-  Menu,
-  MenuItem,
-  Switch,
-  FormControlLabel
+  CircularProgress
 } from '@mui/material';
 import {
   Add as AddIcon,
   Delete as DeleteIcon,
   Edit as EditIcon,
-  Menu as MenuIcon,
-  MoreVert as MoreVertIcon,
-  PlayArrow as PlayArrowIcon,
-  DragIndicator as DragIndicatorIcon
+  PlayArrow as PlayArrowIcon
 } from '@mui/icons-material';
 import { useTaskManager } from '../hooks/useTaskManager';
-import { formatDuration } from '../utils/timer';
-import { exportData, importData } from '../utils/storage';
+import { Task, TaskList } from '../types';
 
 interface TodoListScreenProps {
-  onNavigateToDo: () => void;
+  onStartTasks: () => void;
 }
 
-export const TodoListScreen: React.FC<TodoListScreenProps> = ({ onNavigateToDo }) => {
+const TodoListScreen: React.FC<TodoListScreenProps> = ({ onStartTasks }) => {
   const {
     appState,
+    isLoading,
     addTask,
     updateTask,
     deleteTask,
-    toggleTaskCompletion,
+    toggleTaskComplete,
     addTaskList,
     updateTaskList,
     deleteTaskList,
-    selectList,
-    setWasInDailyList,
-    getCurrentTasks,
-    getCurrentList
+    setCurrentList
   } = useTaskManager();
 
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [showAddDialog, setShowAddDialog] = useState(false);
-  const [showEditDialog, setShowEditDialog] = useState(false);
-  const [editingTask, setEditingTask] = useState<any>(null);
-  const [showRenameDialog, setShowRenameDialog] = useState(false);
-  const [renameListId, setRenameListId] = useState<number | null>(null);
-  const [showAddListDialog, setShowAddListDialog] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState('');
-  const [newTaskDuration, setNewTaskDuration] = useState('');
+  const [newTaskDuration, setNewTaskDuration] = useState('25');
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [newListName, setNewListName] = useState('');
-  const [isDailyTask, setIsDailyTask] = useState(false);
-  const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
-  const [showSyncDialog, setShowSyncDialog] = useState(false);
-  const [syncData, setSyncData] = useState('');
+  const [isAddListDialogOpen, setIsAddListDialogOpen] = useState(false);
 
-  const currentTasks = getCurrentTasks();
-  const currentList = getCurrentList();
+  // Ensure taskLists is always an array and add null checks
+  const taskLists = appState?.taskLists || [];
+  const currentList = taskLists.find(list => list.id === appState?.currentListId);
+  const currentTasks = currentList ? currentList.tasks : (appState?.dailyTasks || []);
+
+  // Show loading state
+  if (isLoading) {
+    return (
+      <Box sx={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        height: '50vh' 
+      }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
 
   const handleAddTask = () => {
     if (newTaskTitle.trim() && newTaskDuration) {
-      const duration = parseInt(newTaskDuration);
-      if (duration > 0) {
-        addTask(
-          newTaskTitle.trim(),
-          duration,
-          isDailyTask,
-          appState.wasInDailyList ? 1 : appState.currentListId
-        );
-        setNewTaskTitle('');
-        setNewTaskDuration('');
-        setIsDailyTask(false);
-        setShowAddDialog(false);
+      const newTask: Task = {
+        id: Date.now().toString(),
+        title: newTaskTitle.trim(),
+        durationSeconds: parseInt(newTaskDuration) * 60,
+        completed: false,
+        order: currentTasks.length
+      };
+
+      if (currentList) {
+        // Add to current list
+        const updatedList: TaskList = {
+          ...currentList,
+          tasks: [...currentList.tasks, newTask]
+        };
+        updateTaskList(currentList.id, updatedList);
+      } else {
+        // Add to daily tasks
+        addTask(newTask);
       }
+
+      setNewTaskTitle('');
+      setNewTaskDuration('25');
+      setIsAddDialogOpen(false);
     }
   };
 
   const handleEditTask = () => {
     if (editingTask && newTaskTitle.trim() && newTaskDuration) {
-      const duration = parseInt(newTaskDuration);
-      if (duration > 0) {
-        updateTask(editingTask.id, {
-          title: newTaskTitle.trim(),
-          durationSeconds: duration
-        });
-        setShowEditDialog(false);
-        setEditingTask(null);
-        setNewTaskTitle('');
-        setNewTaskDuration('');
+      const updatedTask = {
+        ...editingTask,
+        title: newTaskTitle.trim(),
+        durationSeconds: parseInt(newTaskDuration) * 60
+      };
+
+      if (currentList) {
+        const updatedList: TaskList = {
+          ...currentList,
+          tasks: currentList.tasks.map(task => 
+            task.id === editingTask.id ? updatedTask : task
+          )
+        };
+        updateTaskList(currentList.id, updatedList);
+      } else {
+        updateTask(editingTask.id, updatedTask);
       }
+
+      setEditingTask(null);
+      setNewTaskTitle('');
+      setNewTaskDuration('25');
+      setIsEditDialogOpen(false);
+    }
+  };
+
+  const handleDeleteTask = (taskId: string) => {
+    if (currentList) {
+      const updatedList: TaskList = {
+        ...currentList,
+        tasks: currentList.tasks.filter(task => task.id !== taskId)
+      };
+      updateTaskList(currentList.id, updatedList);
+    } else {
+      deleteTask(taskId);
     }
   };
 
   const handleAddList = () => {
     if (newListName.trim()) {
-      addTaskList(newListName.trim());
+      const newList: TaskList = {
+        id: Date.now().toString(),
+        name: newListName.trim(),
+        tasks: []
+      };
+      addTaskList(newList);
       setNewListName('');
-      setShowAddListDialog(false);
+      setIsAddListDialogOpen(false);
     }
   };
 
-  const handleRenameList = () => {
-    if (renameListId && newListName.trim()) {
-      updateTaskList(renameListId, newListName.trim());
-      setShowRenameDialog(false);
-      setRenameListId(null);
-      setNewListName('');
-    }
+  const formatDuration = (seconds: number) => {
+    const minutes = Math.floor(seconds / 60);
+    return `${minutes} min`;
   };
 
-  const openEditDialog = (task: any) => {
-    setEditingTask(task);
-    setNewTaskTitle(task.title);
-    setNewTaskDuration(task.durationSeconds.toString());
-    setShowEditDialog(true);
-  };
-
-  const openRenameDialog = (listId: number, currentName: string) => {
-    setRenameListId(listId);
-    setNewListName(currentName);
-    setShowRenameDialog(true);
-  };
-
-  const handleStartTasks = () => {
-    const incompleteTasks = currentTasks.filter(task => !task.isCompleted);
-    if (incompleteTasks.length > 0) {
-      onNavigateToDo();
-    }
-  };
-
-  const handleExportData = () => {
-    const data = exportData();
-    navigator.clipboard.writeText(data).then(() => {
-      alert('Data copied to clipboard! You can now paste this into your Android app.');
-    });
-  };
-
-  const handleImportData = () => {
-    if (syncData.trim()) {
-      const success = importData(syncData);
-      if (success) {
-        alert('Data imported successfully!');
-        setShowSyncDialog(false);
-        setSyncData('');
-        window.location.reload(); // Refresh to show new data
-      } else {
-        alert('Failed to import data. Please check the format.');
-      }
-    }
-  };
+  const canStartTasks = currentTasks.length > 0 && currentTasks.some(task => !task.completed);
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-      <AppBar position="static">
-        <Toolbar>
-          <IconButton
-            edge="start"
-            color="inherit"
-            onClick={() => setDrawerOpen(true)}
-          >
-            <MenuIcon />
-          </IconButton>
-          <Typography variant="h6" sx={{ flexGrow: 1 }}>
-            {appState.wasInDailyList ? 'Dailies' : currentList?.name || 'Tasks'}
-          </Typography>
-          <Button color="inherit" onClick={() => setShowSyncDialog(true)}>
-            Sync
-          </Button>
-          <Button color="inherit" onClick={handleStartTasks}>
-            Start Tasks
-          </Button>
-        </Toolbar>
-      </AppBar>
-
-      <Box sx={{ flexGrow: 1, overflow: 'auto', p: 2 }}>
-        {currentTasks.length === 0 ? (
-          <Box sx={{ textAlign: 'center', mt: 4 }}>
-            <Typography variant="h6" color="text.secondary">
-              No tasks yet
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-              Add your first task to get started!
-            </Typography>
-          </Box>
-        ) : (
-          <List>
-            {currentTasks.map((task) => (
-              <Card key={task.id} sx={{ mb: 2 }}>
-                <CardContent>
-                  <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', flexGrow: 1 }}>
-                      <IconButton size="small" sx={{ mr: 1 }}>
-                        <DragIndicatorIcon />
-                      </IconButton>
-                      <Box sx={{ flexGrow: 1 }}>
-                        <Typography
-                          variant="h6"
-                          sx={{
-                            textDecoration: task.isCompleted ? 'line-through' : 'none',
-                            color: task.isCompleted ? 'text.secondary' : 'text.primary'
-                          }}
-                        >
-                          {task.title}
-                        </Typography>
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
-                          <Chip
-                            label={formatDuration(task.durationSeconds)}
-                            size="small"
-                            color="primary"
-                            variant="outlined"
-                          />
-                          {task.isDaily && (
-                            <Chip label="Daily" size="small" color="secondary" />
-                          )}
-                        </Box>
-                      </Box>
-                    </Box>
-                    <Box sx={{ display: 'flex', alignItems: 'center' }}>
-                      <Switch
-                        checked={task.isCompleted}
-                        onChange={() => toggleTaskCompletion(task.id)}
-                        color="primary"
-                      />
-                      <IconButton onClick={() => openEditDialog(task)}>
-                        <EditIcon />
-                      </IconButton>
-                      <IconButton onClick={() => deleteTask(task.id)}>
-                        <DeleteIcon />
-                      </IconButton>
-                    </Box>
-                  </Box>
-                </CardContent>
-              </Card>
-            ))}
-          </List>
-        )}
+    <Box sx={{ maxWidth: 600, mx: 'auto' }}>
+      {/* Header */}
+      <Box sx={{ mb: 3, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Typography variant="h4" component="h1">
+          {currentList ? currentList.name : 'Daily Tasks'}
+        </Typography>
+        <Button
+          variant="contained"
+          color="primary"
+          startIcon={<PlayArrowIcon />}
+          onClick={onStartTasks}
+          disabled={!canStartTasks}
+        >
+          Start Tasks
+        </Button>
       </Box>
 
+      {/* Task Lists */}
+      {taskLists.length > 0 && (
+        <Box sx={{ mb: 3 }}>
+          <Typography variant="h6" sx={{ mb: 1 }}>
+            Task Lists
+          </Typography>
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+            <Chip
+              label="Daily Tasks"
+              color={!currentList ? "primary" : "default"}
+              onClick={() => setCurrentList('')}
+              clickable
+            />
+            {taskLists.map(list => (
+              <Chip
+                key={list.id}
+                label={list.name}
+                color={currentList?.id === list.id ? "primary" : "default"}
+                onClick={() => setCurrentList(list.id)}
+                onDelete={() => deleteTaskList(list.id)}
+                clickable
+              />
+            ))}
+            <Chip
+              label="+ Add List"
+              variant="outlined"
+              onClick={() => setIsAddListDialogOpen(true)}
+              clickable
+            />
+          </Box>
+        </Box>
+      )}
+
+      {/* Tasks */}
+      {currentTasks.length === 0 ? (
+        <Card>
+          <CardContent sx={{ textAlign: 'center', py: 4 }}>
+            <Typography variant="h6" color="text.secondary" sx={{ mb: 2 }}>
+              No tasks yet
+            </Typography>
+            <Typography color="text.secondary" sx={{ mb: 2 }}>
+              {currentList ? 'Add tasks to this list to get started' : 'Add daily tasks to get started'}
+            </Typography>
+            <Button
+              variant="contained"
+              startIcon={<AddIcon />}
+              onClick={() => setIsAddDialogOpen(true)}
+            >
+              Add First Task
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card>
+          <CardContent>
+            <List>
+              {currentTasks.map((task, index) => (
+                <React.Fragment key={task.id}>
+                  <ListItem
+                    sx={{
+                      opacity: task.completed ? 0.6 : 1,
+                      textDecoration: task.completed ? 'line-through' : 'none'
+                    }}
+                  >
+                    <Checkbox
+                      checked={task.completed}
+                      onChange={() => {
+                        if (currentList) {
+                          // Toggle completion in the current list
+                          const updatedList: TaskList = {
+                            ...currentList,
+                            tasks: currentList.tasks.map(t => 
+                              t.id === task.id ? { ...t, completed: !t.completed } : t
+                            )
+                          };
+                          updateTaskList(currentList.id, updatedList);
+                        } else {
+                          // Toggle completion in daily tasks
+                          toggleTaskComplete(task.id);
+                        }
+                      }}
+                    />
+                    <ListItemText
+                      primary={task.title}
+                      secondary={formatDuration(task.durationSeconds)}
+                    />
+                    <ListItemSecondaryAction>
+                      <IconButton
+                        edge="end"
+                        onClick={() => {
+                          setEditingTask(task);
+                          setNewTaskTitle(task.title);
+                          setNewTaskDuration(Math.floor(task.durationSeconds / 60).toString());
+                          setIsEditDialogOpen(true);
+                        }}
+                      >
+                        <EditIcon />
+                      </IconButton>
+                      <IconButton
+                        edge="end"
+                        onClick={() => handleDeleteTask(task.id)}
+                      >
+                        <DeleteIcon />
+                      </IconButton>
+                    </ListItemSecondaryAction>
+                  </ListItem>
+                  {index < currentTasks.length - 1 && <Divider />}
+                </React.Fragment>
+              ))}
+            </List>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Add Task FAB */}
       <Fab
         color="primary"
-        aria-label="add"
+        aria-label="add task"
         sx={{ position: 'fixed', bottom: 16, right: 16 }}
-        onClick={() => setShowAddDialog(true)}
+        onClick={() => setIsAddDialogOpen(true)}
       >
         <AddIcon />
       </Fab>
 
-      {/* Navigation Drawer */}
-      <Drawer
-        anchor="left"
-        open={drawerOpen}
-        onClose={() => setDrawerOpen(false)}
-      >
-        <Box sx={{ width: 300, p: 2 }}>
-          <Typography variant="h6" sx={{ mb: 2 }}>
-            DoWithTime
-          </Typography>
-          
-          <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 'bold' }}>
-            Dailies
-          </Typography>
-          <Button
-            fullWidth
-            variant={appState.wasInDailyList ? 'contained' : 'text'}
-            onClick={() => {
-              setWasInDailyList(true);
-              setDrawerOpen(false);
-            }}
-            sx={{ justifyContent: 'flex-start', mb: 1 }}
-          >
-            Dailies
-          </Button>
-          
-          <Divider sx={{ my: 2 }} />
-          
-          <Typography variant="subtitle2" sx={{ mb: 1, fontWeight: 'bold' }}>
-            Your Lists
-          </Typography>
-          {appState.taskLists.map((list) => (
-            <Box key={list.id} sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
-              <Button
-                fullWidth
-                variant={!appState.wasInDailyList && list.id === appState.currentListId ? 'contained' : 'text'}
-                onClick={() => {
-                  setWasInDailyList(false);
-                  selectList(list.id);
-                  setDrawerOpen(false);
-                }}
-                sx={{ justifyContent: 'flex-start' }}
-              >
-                {list.name}
-              </Button>
-              <IconButton size="small" onClick={() => openRenameDialog(list.id, list.name)}>
-                <EditIcon fontSize="small" />
-              </IconButton>
-              {appState.taskLists.length > 1 && (
-                <IconButton size="small" onClick={() => deleteTaskList(list.id)}>
-                  <DeleteIcon fontSize="small" />
-                </IconButton>
-              )}
-            </Box>
-          ))}
-          
-          <Button
-            fullWidth
-            variant="outlined"
-            onClick={() => {
-              setShowAddListDialog(true);
-              setDrawerOpen(false);
-            }}
-            sx={{ mt: 2 }}
-          >
-            Add New List
-          </Button>
-        </Box>
-      </Drawer>
-
       {/* Add Task Dialog */}
-      <Dialog open={showAddDialog} onClose={() => setShowAddDialog(false)} maxWidth="sm" fullWidth>
+      <Dialog open={isAddDialogOpen} onClose={() => setIsAddDialogOpen(false)}>
         <DialogTitle>Add New Task</DialogTitle>
         <DialogContent>
           <TextField
@@ -344,37 +313,30 @@ export const TodoListScreen: React.FC<TodoListScreenProps> = ({ onNavigateToDo }
             margin="dense"
             label="Task Title"
             fullWidth
+            variant="outlined"
             value={newTaskTitle}
             onChange={(e) => setNewTaskTitle(e.target.value)}
             sx={{ mb: 2 }}
           />
           <TextField
             margin="dense"
-            label="Duration (seconds)"
+            label="Duration (minutes)"
             type="number"
             fullWidth
+            variant="outlined"
             value={newTaskDuration}
             onChange={(e) => setNewTaskDuration(e.target.value)}
-            sx={{ mb: 2 }}
-          />
-          <FormControlLabel
-            control={
-              <Switch
-                checked={isDailyTask}
-                onChange={(e) => setIsDailyTask(e.target.checked)}
-              />
-            }
-            label="Daily Task"
+            inputProps={{ min: 1, max: 480 }}
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setShowAddDialog(false)}>Cancel</Button>
+          <Button onClick={() => setIsAddDialogOpen(false)}>Cancel</Button>
           <Button onClick={handleAddTask} variant="contained">Add Task</Button>
         </DialogActions>
       </Dialog>
 
       {/* Edit Task Dialog */}
-      <Dialog open={showEditDialog} onClose={() => setShowEditDialog(false)} maxWidth="sm" fullWidth>
+      <Dialog open={isEditDialogOpen} onClose={() => setIsEditDialogOpen(false)}>
         <DialogTitle>Edit Task</DialogTitle>
         <DialogContent>
           <TextField
@@ -382,107 +344,49 @@ export const TodoListScreen: React.FC<TodoListScreenProps> = ({ onNavigateToDo }
             margin="dense"
             label="Task Title"
             fullWidth
+            variant="outlined"
             value={newTaskTitle}
             onChange={(e) => setNewTaskTitle(e.target.value)}
             sx={{ mb: 2 }}
           />
           <TextField
             margin="dense"
-            label="Duration (seconds)"
+            label="Duration (minutes)"
             type="number"
             fullWidth
+            variant="outlined"
             value={newTaskDuration}
             onChange={(e) => setNewTaskDuration(e.target.value)}
-            sx={{ mb: 2 }}
+            inputProps={{ min: 1, max: 480 }}
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setShowEditDialog(false)}>Cancel</Button>
+          <Button onClick={() => setIsEditDialogOpen(false)}>Cancel</Button>
           <Button onClick={handleEditTask} variant="contained">Save Changes</Button>
         </DialogActions>
       </Dialog>
 
       {/* Add List Dialog */}
-      <Dialog open={showAddListDialog} onClose={() => setShowAddListDialog(false)}>
-        <DialogTitle>Add New List</DialogTitle>
+      <Dialog open={isAddListDialogOpen} onClose={() => setIsAddListDialogOpen(false)}>
+        <DialogTitle>Add New Task List</DialogTitle>
         <DialogContent>
           <TextField
             autoFocus
             margin="dense"
             label="List Name"
             fullWidth
+            variant="outlined"
             value={newListName}
             onChange={(e) => setNewListName(e.target.value)}
           />
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setShowAddListDialog(false)}>Cancel</Button>
+          <Button onClick={() => setIsAddListDialogOpen(false)}>Cancel</Button>
           <Button onClick={handleAddList} variant="contained">Add List</Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Rename List Dialog */}
-      <Dialog open={showRenameDialog} onClose={() => setShowRenameDialog(false)}>
-        <DialogTitle>Rename List</DialogTitle>
-        <DialogContent>
-          <TextField
-            autoFocus
-            margin="dense"
-            label="List Name"
-            fullWidth
-            value={newListName}
-            onChange={(e) => setNewListName(e.target.value)}
-          />
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowRenameDialog(false)}>Cancel</Button>
-          <Button onClick={handleRenameList} variant="contained">Save</Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Sync Dialog */}
-      <Dialog open={showSyncDialog} onClose={() => setShowSyncDialog(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Sync Data</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" sx={{ mb: 2 }}>
-            Export your data to copy to your Android app, or import data from your Android app.
-          </Typography>
-          
-          <Box sx={{ mb: 3 }}>
-            <Typography variant="h6" sx={{ mb: 1 }}>Export Data</Typography>
-            <Typography variant="body2" sx={{ mb: 2 }}>
-              Click the button below to copy your current data to clipboard. Then paste it into your Android app.
-            </Typography>
-            <Button variant="contained" onClick={handleExportData} fullWidth>
-              Export to Clipboard
-            </Button>
-          </Box>
-          
-          <Divider sx={{ my: 2 }} />
-          
-          <Box>
-            <Typography variant="h6" sx={{ mb: 1 }}>Import Data</Typography>
-            <Typography variant="body2" sx={{ mb: 2 }}>
-              Paste data from your Android app below to import it here.
-            </Typography>
-            <TextField
-              multiline
-              rows={6}
-              fullWidth
-              placeholder="Paste your Android app data here..."
-              value={syncData}
-              onChange={(e) => setSyncData(e.target.value)}
-              sx={{ mb: 2 }}
-            />
-            <Button variant="contained" onClick={handleImportData} fullWidth>
-              Import Data
-            </Button>
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setShowSyncDialog(false)}>Close</Button>
         </DialogActions>
       </Dialog>
     </Box>
   );
-}; 
+};
+
+export default TodoListScreen; 

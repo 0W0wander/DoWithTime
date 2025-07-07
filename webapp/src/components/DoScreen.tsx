@@ -1,335 +1,324 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Box,
+  Card,
+  CardContent,
+  Typography,
   Button,
   IconButton,
-  Typography,
-  AppBar,
-  Toolbar,
+  LinearProgress,
   Dialog,
-  DialogActions,
-  DialogContent,
   DialogTitle,
-  Paper
+  DialogContent,
+  DialogActions,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemIcon,
+  Chip
 } from '@mui/material';
 import {
-  ArrowBack as ArrowBackIcon,
-  PlayArrow as PlayArrowIcon,
+  PlayArrow as PlayIcon,
   Pause as PauseIcon,
   Stop as StopIcon,
-  Refresh as RefreshIcon,
-  SkipNext as SkipNextIcon
+  Refresh as ResetIcon,
+  SkipNext as SkipNextIcon,
+  ArrowBack as BackIcon,
+  CheckCircle as CheckIcon,
+  RadioButtonUnchecked as UncheckIcon
 } from '@mui/icons-material';
-import { useTimer } from '../hooks/useTimer';
 import { useTaskManager } from '../hooks/useTaskManager';
-import { formatDuration, formatTimeRemaining } from '../utils/timer';
+import { useTimer } from '../hooks/useTimer';
+import { formatDuration } from '../utils/timer';
 
 interface DoScreenProps {
-  onNavigateBack: () => void;
+  onBackToList: () => void;
 }
 
-export const DoScreen: React.FC<DoScreenProps> = ({ onNavigateBack }) => {
+const DoScreen: React.FC<DoScreenProps> = ({ onBackToList }) => {
+  const { appState } = useTaskManager();
   const {
-    timerState,
+    currentTaskIndex,
+    timeRemaining,
+    isRunning,
+    isPaused,
+    isTransitioning,
     startTimer,
     pauseTimer,
     resumeTimer,
     stopTimer,
     resetTimer,
-    skipTransition,
-    nextTask,
-    stopAlarm
+    nextTask
   } = useTimer();
 
-  const { getCurrentTasks, toggleTaskCompletion } = useTaskManager();
-  const [currentTaskIndex, setCurrentTaskIndex] = useState(0);
-  const [showAlarmDialog, setShowAlarmDialog] = useState(false);
+  // Ensure taskLists is always an array and add null checks
+  const taskLists = appState?.taskLists || [];
+  const currentList = taskLists.find(list => list.id === appState?.currentListId);
+  const currentTasks = currentList ? currentList.tasks : (appState?.dailyTasks || []);
+  const incompleteTasks = currentTasks.filter(task => !task.completed);
+  const currentTask = incompleteTasks[currentTaskIndex];
 
-  const currentTasks = getCurrentTasks().filter(task => !task.isCompleted);
-  
-  // Handle transition state
-  useEffect(() => {
-    if (timerState.isTransitioning && timerState.transitionTime > 0) {
-      const interval = setInterval(() => {
-        if (timerState.transitionTime <= 1) {
-          // Transition finished, move to next task
-          if (currentTaskIndex < currentTasks.length - 1) {
-            setCurrentTaskIndex(currentTaskIndex + 1);
-            const nextTask = currentTasks[currentTaskIndex + 1];
-            if (nextTask) {
-              startTimer(nextTask);
-            }
-          } else {
-            // All tasks completed
-            onNavigateBack();
-          }
-        }
-      }, 1000);
-      
-      return () => clearInterval(interval);
-    }
-  }, [timerState.isTransitioning, timerState.transitionTime, currentTaskIndex, currentTasks, startTimer, onNavigateBack]);
+  const [showTaskList, setShowTaskList] = useState(false);
 
   useEffect(() => {
-    if (timerState.showAlarm) {
-      setShowAlarmDialog(true);
+    if (incompleteTasks.length === 0) {
+      // All tasks completed, go back to list
+      onBackToList();
     }
-  }, [timerState.showAlarm]);
+  }, [incompleteTasks.length, onBackToList]);
 
-  const handleStartCurrentTask = () => {
-    if (currentTasks[currentTaskIndex]) {
-      startTimer(currentTasks[currentTaskIndex]);
-    }
-  };
-
-  const handleNextTask = () => {
-    setShowAlarmDialog(false);
-    stopAlarm();
-    
-    // Complete the current task
-    if (currentTask) {
-      if (currentTask.isDaily) {
-        // For daily tasks, mark as completed for today but don't remove from list
-        toggleTaskCompletion(currentTask.id);
-      } else {
-        // For regular tasks, mark as completed and remove from list
-        toggleTaskCompletion(currentTask.id);
-      }
-    }
-    
-    // Move to next task
-    if (currentTaskIndex < currentTasks.length - 1) {
-      setCurrentTaskIndex(currentTaskIndex + 1);
-      // Start the next task automatically
-      const nextTask = currentTasks[currentTaskIndex + 1];
-      if (nextTask) {
-        startTimer(nextTask);
-      }
-    } else {
-      // All tasks completed
-      onNavigateBack();
+  const handleStart = () => {
+    if (incompleteTasks.length > 0) {
+      startTimer(incompleteTasks);
     }
   };
 
-  const handleStopAlarm = () => {
-    setShowAlarmDialog(false);
-    stopAlarm();
+  const handlePause = () => {
+    pauseTimer();
   };
 
-  const handleBack = () => {
+  const handleResume = () => {
+    resumeTimer();
+  };
+
+  const handleStop = () => {
     stopTimer();
-    onNavigateBack();
   };
 
-  const currentTask = currentTasks[currentTaskIndex];
+  const handleReset = () => {
+    resetTimer();
+  };
 
-  if (!currentTask) {
+  const handleNext = () => {
+    nextTask();
+  };
+
+
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const getProgress = () => {
+    if (!currentTask || !isRunning) return 0;
+    const totalTime = currentTask.durationSeconds;
+    const elapsed = totalTime - timeRemaining;
+    return (elapsed / totalTime) * 100;
+  };
+
+  if (incompleteTasks.length === 0) {
     return (
-      <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-        <AppBar position="static">
-          <Toolbar>
-            <IconButton edge="start" color="inherit" onClick={handleBack}>
-              <ArrowBackIcon />
-            </IconButton>
-            <Typography variant="h6" sx={{ flexGrow: 1 }}>
-              Do
-            </Typography>
-          </Toolbar>
-        </AppBar>
-        
-        <Box sx={{ 
-          display: 'flex', 
-          flexDirection: 'column', 
-          alignItems: 'center', 
-          justifyContent: 'center', 
-          flexGrow: 1,
-          p: 3
-        }}>
-          <Typography variant="h5" sx={{ mb: 2 }}>
-            No tasks available
-          </Typography>
-          <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
-            Add some tasks first!
-          </Typography>
-          <Button variant="contained" onClick={handleBack}>
-            Go Back
-          </Button>
-        </Box>
+      <Box sx={{ textAlign: 'center', mt: 4 }}>
+        <Typography variant="h6" color="text.secondary">
+          All tasks completed!
+        </Typography>
+        <Button
+          variant="contained"
+          onClick={onBackToList}
+          sx={{ mt: 2 }}
+        >
+          Back to Tasks
+        </Button>
       </Box>
     );
   }
 
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
-      <AppBar position="static">
-        <Toolbar>
-          <IconButton edge="start" color="inherit" onClick={handleBack}>
-            <ArrowBackIcon />
-          </IconButton>
-          <Typography variant="h6" sx={{ flexGrow: 1 }}>
-            Do
-          </Typography>
-        </Toolbar>
-      </AppBar>
+    <Box sx={{ maxWidth: 600, mx: 'auto' }}>
+      {/* Header */}
+      <Box sx={{ mb: 3, display: 'flex', alignItems: 'center', gap: 2 }}>
+        <IconButton onClick={onBackToList}>
+          <BackIcon />
+        </IconButton>
+        <Typography variant="h4" component="h1">
+          {currentTask ? currentTask.title : 'Ready to Start'}
+        </Typography>
+      </Box>
 
-      <Box sx={{ 
-        display: 'flex', 
-        flexDirection: 'column', 
-        alignItems: 'center', 
-        justifyContent: 'center', 
-        flexGrow: 1,
-        p: 3
-      }}>
-        {/* Transition Screen */}
-        {timerState.isTransitioning && (
-          <Box sx={{ 
-            display: 'flex', 
-            flexDirection: 'column', 
-            alignItems: 'center', 
-            justifyContent: 'center',
-            textAlign: 'center'
-          }}>
-            <Typography variant="h4" sx={{ mb: 2, fontWeight: 'bold', color: 'primary.main' }}>
-              Next task in
-            </Typography>
-            <Typography variant="h1" sx={{ mb: 2, fontWeight: 'bold', color: 'primary.main' }}>
-              {timerState.transitionTime}s
-            </Typography>
-            <Typography variant="h6" sx={{ mb: 2, color: 'text.secondary' }}>
-              Preparing next task...
-            </Typography>
-            <Button 
-              variant="outlined" 
-              onClick={skipTransition}
-              sx={{ mt: 2 }}
-            >
-              Skip Transition
-            </Button>
-          </Box>
-        )}
-        
-                {/* Current Task Info */}
-        {!timerState.isTransitioning && (
-          <>
-            <Box sx={{ textAlign: 'center', mb: 4 }}>
-              <Typography variant="body1" color="text.secondary" sx={{ mb: 1 }}>
-                Current Task
+      {/* Timer Display */}
+      <Card sx={{ mb: 3 }}>
+        <CardContent sx={{ textAlign: 'center', py: 4 }}>
+          {isTransitioning ? (
+            <>
+              <Typography variant="h2" color="primary" sx={{ mb: 2 }}>
+                {formatTime(timeRemaining)}
               </Typography>
-              <Typography variant="h4" sx={{ mb: 1, fontWeight: 'bold', color: 'primary.main' }}>
-                {currentTask.title}
+              <Typography variant="h6" color="text.secondary">
+                Next task in...
               </Typography>
-              <Typography variant="body1" color="text.secondary">
-                {formatDuration(currentTask.durationSeconds)}
+            </>
+          ) : (
+            <>
+              <Typography variant="h2" color="primary" sx={{ mb: 2 }}>
+                {formatTime(timeRemaining)}
               </Typography>
-            </Box>
-
-            {/* Timer Display */}
-            <Paper 
-              elevation={3} 
-              sx={{ 
-                p: 4, 
-                borderRadius: 4, 
-                textAlign: 'center',
-                mb: 4,
-                minWidth: 300
-              }}
-            >
-              <Typography variant="h2" sx={{ fontWeight: 'bold', mb: 2 }}>
-                {formatTimeRemaining(timerState.timeRemaining)}
+              <Typography variant="h6" color="text.secondary" sx={{ mb: 2 }}>
+                {currentTask ? `${currentTask.title} (${formatDuration(currentTask.durationSeconds)})` : 'No task selected'}
               </Typography>
               
-              {/* Control Buttons */}
-              <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mb: 2 }}>
-                <IconButton 
-                  onClick={resetTimer}
-                  size="large"
-                  color="secondary"
-                >
-                  <RefreshIcon />
-                </IconButton>
-                
-                <IconButton 
-                  onClick={stopTimer}
-                  size="large"
-                  color="error"
-                >
-                  <StopIcon />
-                </IconButton>
-                
-                <IconButton 
-                  onClick={handleNextTask}
-                  size="large"
-                  color="primary"
-                >
-                  <SkipNextIcon />
-                </IconButton>
-              </Box>
-            </Paper>
+              {isRunning && (
+                <LinearProgress 
+                  variant="determinate" 
+                  value={getProgress()} 
+                  sx={{ height: 8, borderRadius: 4, mb: 2 }}
+                />
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
 
-            {/* Big Play/Pause Button */}
-            <Box sx={{ mb: 4 }}>
-              <IconButton
-                onClick={timerState.isRunning ? pauseTimer : handleStartCurrentTask}
-                sx={{
-                  width: 120,
-                  height: 120,
-                  backgroundColor: 'primary.main',
-                  color: 'white',
-                  '&:hover': {
-                    backgroundColor: 'primary.dark',
-                  },
-                  boxShadow: 3
-                }}
-                size="large"
-              >
-                {timerState.isRunning ? (
-                  <PauseIcon sx={{ fontSize: 60 }} />
-                ) : (
-                  <PlayArrowIcon sx={{ fontSize: 60 }} />
-                )}
-              </IconButton>
-            </Box>
-
-            {/* Task Progress */}
-            <Box sx={{ textAlign: 'center' }}>
-              <Typography variant="body2" color="text.secondary">
-                Task {currentTaskIndex + 1} of {currentTasks.length}
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                {currentTasks.length - currentTaskIndex - 1} tasks remaining
-              </Typography>
-            </Box>
+      {/* Controls */}
+      <Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mb: 3 }}>
+        {!isRunning && !isPaused && (
+          <Button
+            variant="contained"
+            size="large"
+            startIcon={<PlayIcon />}
+            onClick={handleStart}
+            sx={{ minWidth: 120 }}
+          >
+            Start
+          </Button>
+        )}
+        
+        {isRunning && (
+          <>
+            <Button
+              variant="outlined"
+              size="large"
+              startIcon={<PauseIcon />}
+              onClick={handlePause}
+            >
+              Pause
+            </Button>
+            <Button
+              variant="outlined"
+              size="large"
+              startIcon={<SkipNextIcon />}
+              onClick={handleNext}
+            >
+              Next
+            </Button>
           </>
+        )}
+        
+        {isPaused && (
+          <>
+            <Button
+              variant="contained"
+              size="large"
+              startIcon={<PlayIcon />}
+              onClick={handleResume}
+            >
+              Resume
+            </Button>
+            <Button
+              variant="outlined"
+              size="large"
+              startIcon={<StopIcon />}
+              onClick={handleStop}
+            >
+              Stop
+            </Button>
+          </>
+        )}
+        
+        {(isRunning || isPaused) && (
+          <Button
+            variant="outlined"
+            size="large"
+            startIcon={<ResetIcon />}
+            onClick={handleReset}
+          >
+            Reset
+          </Button>
         )}
       </Box>
 
-      {/* Alarm Dialog */}
+      {/* Task List */}
+      <Card>
+        <CardContent>
+          <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+            <Typography variant="h6">
+              Tasks ({incompleteTasks.length} remaining)
+            </Typography>
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={() => setShowTaskList(!showTaskList)}
+            >
+              {showTaskList ? 'Hide' : 'Show'} List
+            </Button>
+          </Box>
+          
+          {showTaskList && (
+            <List>
+              {incompleteTasks.map((task, index) => (
+                <ListItem key={task.id}>
+                  <ListItemIcon>
+                    {index === currentTaskIndex && isRunning ? (
+                      <CheckIcon color="primary" />
+                    ) : (
+                      <UncheckIcon />
+                    )}
+                  </ListItemIcon>
+                  <ListItemText
+                    primary={task.title}
+                    secondary={formatDuration(task.durationSeconds)}
+                  />
+                  <Chip
+                    label={index === currentTaskIndex ? 'Current' : `${index + 1}`}
+                    color={index === currentTaskIndex ? 'primary' : 'default'}
+                    size="small"
+                  />
+                </ListItem>
+              ))}
+            </List>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Task List Dialog */}
       <Dialog 
-        open={showAlarmDialog} 
-        onClose={handleStopAlarm}
+        open={showTaskList} 
+        onClose={() => setShowTaskList(false)}
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle sx={{ textAlign: 'center' }}>
-          ⏰ Time's Up!
-        </DialogTitle>
-        <DialogContent sx={{ textAlign: 'center' }}>
-          <Typography variant="h6" sx={{ mb: 2 }}>
-            {currentTask.title}
-          </Typography>
-          <Typography variant="body1" color="text.secondary">
-            Your task time has ended. Great job staying focused!
-          </Typography>
+        <DialogTitle>Task List</DialogTitle>
+        <DialogContent>
+          <List>
+            {incompleteTasks.map((task, index) => (
+              <ListItem key={task.id}>
+                <ListItemIcon>
+                  {index === currentTaskIndex && isRunning ? (
+                    <CheckIcon color="primary" />
+                  ) : (
+                    <UncheckIcon />
+                  )}
+                </ListItemIcon>
+                <ListItemText
+                  primary={task.title}
+                  secondary={formatDuration(task.durationSeconds)}
+                />
+                <Chip
+                  label={index === currentTaskIndex ? 'Current' : `${index + 1}`}
+                  color={index === currentTaskIndex ? 'primary' : 'default'}
+                  size="small"
+                />
+              </ListItem>
+            ))}
+          </List>
         </DialogContent>
-        <DialogActions sx={{ justifyContent: 'center', pb: 3 }}>
-          <Button onClick={handleStopAlarm} variant="outlined">
-            Stop Alarm
-          </Button>
-          <Button onClick={handleNextTask} variant="contained">
-            Next Task
-          </Button>
+        <DialogActions>
+          <Button onClick={() => setShowTaskList(false)}>Close</Button>
         </DialogActions>
       </Dialog>
     </Box>
   );
-}; 
+};
+
+export default DoScreen; 
