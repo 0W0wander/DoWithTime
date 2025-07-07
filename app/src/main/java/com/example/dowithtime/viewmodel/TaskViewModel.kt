@@ -164,7 +164,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     
-    fun addTask(title: String, durationSeconds: Int, isDaily: Boolean = false) {
+    fun addTask(title: String, durationSeconds: Int, isDaily: Boolean = false, addToTop: Boolean = false) {
         viewModelScope.launch {
             // Ensure we have a valid current list ID for non-daily tasks
             val currentListId = if (isDaily) -1 else {
@@ -180,11 +180,19 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 isDaily = isDaily
             )
             repository.insertTask(task)
+            
             if (isDaily) {
                 refreshDailyTasks()
             } else {
                 // Use the same list ID that was used to create the task
                 refreshTasksForCurrentList(currentListId)
+                
+                // If addToTop is true, move the task to the top of the list
+                if (addToTop) {
+                    val currentTasks = repository.getIncompleteTasksByList(currentListId).first()
+                    val newTask = currentTasks.last() // The task we just added will be at the end
+                    insertTasksAtPosition(listOf(newTask), 0) // Move it to position 0 (top)
+                }
             }
             uploadToCloud()
         }

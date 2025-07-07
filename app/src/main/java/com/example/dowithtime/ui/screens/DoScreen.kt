@@ -309,16 +309,4 @@ fun DoScreen(
             )
         }
     }
-}
-
-private fun formatDuration(durationSeconds: Int): String {
-    val minutes = durationSeconds / 60
-    val seconds = durationSeconds % 60
-    
-    return when {
-        minutes > 0 && seconds > 0 -> "${minutes}m ${seconds}s"
-        minutes > 0 -> "${minutes}m"
-        seconds > 0 -> "${seconds}s"
-        else -> "0s"
-    }
 } 
