@@ -1516,7 +1516,9 @@ fun TodoListScreen(
                                     onDelete = { viewModel.deleteTask(task) },
                                     onComplete = {
                                         if (task.isDaily) {
-                                            viewModel.markDailyTaskCompleted(task)
+                                            scope.launch {
+                                                viewModel.markDailyTaskCompleted(task)
+                                            }
                                         } else {
                                             viewModel.markTaskCompleted(task)
                                         }
