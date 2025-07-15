@@ -18,6 +18,7 @@ class TimerService : Service() {
     private var countDownTimer: CountDownTimer? = null
     private var transitionTimer: CountDownTimer? = null
     private var mediaPlayer: MediaPlayer? = null
+    private var viewModelCallback: (() -> Unit)? = null
     
     private val _currentTask = MutableStateFlow<Task?>(null)
     val currentTask: StateFlow<Task?> = _currentTask
@@ -59,6 +60,10 @@ class TimerService : Service() {
         fun getService(): TimerService = this@TimerService
     }
     
+    fun setViewModelCallback(callback: () -> Unit) {
+        viewModelCallback = callback
+    }
+    
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
@@ -82,6 +87,7 @@ class TimerService : Service() {
     }
     
     fun startTask(task: Task) {
+        println("DEBUG: TimerService.startTask called with task: ${task.title}")
         // Stop any existing timer first
         countDownTimer?.cancel()
         transitionTimer?.cancel()
@@ -188,20 +194,32 @@ class TimerService : Service() {
     }
     
     private fun nextTask() {
+        println("DEBUG: TimerService.nextTask called, showAlarm: ${_showAlarm.value}")
+        val wasShowingAlarm = _showAlarm.value
         stopAlarm()
-        // Send broadcast to notify ViewModel to handle next task
-        val intent = Intent("com.example.dowithtime.NEXT_TASK")
-        sendBroadcast(intent)
         
         // Reset the timer state to prepare for the next task
         _isRunning.value = false
         _isPaused.value = false
         
-        if (_isTransitioning.value) {
-            // If already transitioning, skip the transition entirely
-            skipTransition()
+        // If we were showing an alarm, call the ViewModel's nextTask method directly
+        // This bypasses the broadcast system and uses the same logic as the in-app button
+        if (wasShowingAlarm) {
+            // Call the ViewModel's nextTask method directly
+            println("DEBUG: TimerService calling ViewModel nextTask directly")
+            viewModelCallback?.invoke()
         } else {
-            startTransition()
+            // For non-alarm cases, use the original broadcast system
+            val intent = Intent("com.example.dowithtime.NEXT_TASK")
+            println("DEBUG: TimerService sending NEXT_TASK broadcast")
+            sendBroadcast(intent)
+            
+            if (_isTransitioning.value) {
+                // If already transitioning, skip the transition entirely
+                skipTransition()
+            } else {
+                startTransition()
+            }
         }
     }
     
