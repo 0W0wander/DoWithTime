@@ -591,13 +591,26 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                                     println("DEBUG: Was showing alarm, moving directly to next task")
                                     moveToNextTask()
                                 } else {
-                                    println("DEBUG: Was not showing alarm, starting transition")
-                                    // Start the transition period
-                                    timerService?.let { service ->
-                                        val intent = android.content.Intent(getApplication(), TimerService::class.java).apply {
-                                            action = TimerService.ACTION_NEXT_TASK
+                                    println("DEBUG: Was not showing alarm, checking if there's a next task")
+                                    // Check if there's a next task before starting transition
+                                    val nextTask = getNextTask()
+                                    if (nextTask != null) {
+                                        println("DEBUG: Next task exists, starting transition")
+                                        // Start the transition period
+                                        timerService?.let { service ->
+                                            val intent = android.content.Intent(getApplication(), TimerService::class.java).apply {
+                                                action = TimerService.ACTION_NEXT_TASK
+                                            }
+                                            getApplication<Application>().startService(intent)
                                         }
-                                        getApplication<Application>().startService(intent)
+                                    } else {
+                                        println("DEBUG: No next task, immediately finishing session")
+                                        // No next task, immediately finish the session
+                                        stopTimer()
+                                        if (_isInActiveSession.value) {
+                                            _isInActiveSession.value = false
+                                            _onAllTasksCompleted?.invoke()
+                                        }
                                     }
                                 }
                                 uploadToCloud()
@@ -683,12 +696,24 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                     // Small delay to ensure the task list is updated
                     kotlinx.coroutines.delay(100)
                 }
-                // Trigger the transition instead of directly moving to next task
-                timerService?.let { service ->
-                    val intent = android.content.Intent(getApplication(), TimerService::class.java).apply {
-                        action = TimerService.ACTION_NEXT_TASK
+                
+                // Check if there's a next task before starting transition
+                val nextTask = getNextTask()
+                if (nextTask != null) {
+                    // There's a next task, start the transition
+                    timerService?.let { service ->
+                        val intent = android.content.Intent(getApplication(), TimerService::class.java).apply {
+                            action = TimerService.ACTION_NEXT_TASK
+                        }
+                        getApplication<Application>().startService(intent)
                     }
-                    getApplication<Application>().startService(intent)
+                } else {
+                    // No next task, immediately finish the session
+                    stopTimer()
+                    if (_isInActiveSession.value) {
+                        _isInActiveSession.value = false
+                        _onAllTasksCompleted?.invoke()
+                    }
                 }
                 uploadToCloud()
             }
