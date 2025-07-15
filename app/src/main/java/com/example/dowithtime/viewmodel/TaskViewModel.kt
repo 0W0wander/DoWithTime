@@ -74,6 +74,10 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         val database = AppDatabase.getDatabase(application)
         repository = TaskRepository(database.taskDao())
         cloudSync = CloudSync(application)
+        
+        // Set loading to true initially to prevent flash of completed tasks
+        _isLoading.value = true
+        
         refreshTaskLists()
         // Don't call refreshTasksForCurrentList here as it will be called after loadData() sets the current list ID
         
@@ -92,7 +96,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     
     private fun loadData() {
         viewModelScope.launch {
-            _tasks.value = repository.getAllTasks()
+            // Don't load all tasks initially - only load incomplete tasks for the current list
             _taskLists.value = repository.getAllTaskLists().first()
             
             // Set current list to first available list if none is set
@@ -101,6 +105,9 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 // Refresh tasks for the newly set current list
                 refreshTasksForCurrentList(_currentListId.value)
             }
+            
+            // Set loading to false after data is loaded
+            _isLoading.value = false
         }
     }
     
@@ -154,17 +161,17 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         // Update current list ID
         _currentListId.value = currentListId
         
-        // Reload data
-        _tasks.value = repository.getAllTasks()
+        // Reload data - but don't populate _tasks with all tasks
         _taskLists.value = repository.getAllTaskLists().first()
         _dailyTasks.value = repository.getAllDailyTasks().first()
         
         // Set current list to first available list if none is set
         if (_taskLists.value.isNotEmpty() && _currentListId.value == null) {
             _currentListId.value = _taskLists.value.first().id
-            // Refresh tasks for the newly set current list
-            refreshTasksForCurrentList(_currentListId.value)
         }
+        
+        // Refresh tasks for the current list to show only incomplete tasks
+        refreshTasksForCurrentList(_currentListId.value)
     }
     
     fun addTask(title: String, durationSeconds: Int, isDaily: Boolean = false, addToTop: Boolean = false) {

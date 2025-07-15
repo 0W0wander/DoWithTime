@@ -1214,6 +1214,7 @@ fun TodoListScreen(
     val taskLists by viewModel.taskLists.collectAsState()
     val currentListId by viewModel.currentListId.collectAsState()
     val wasInDailyList by viewModel.wasInDailyList.collectAsState()
+    val isLoading by viewModel.isLoading.collectAsState()
     var showAddDialog by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
     var editingTask by remember { mutableStateOf<Task?>(null) }
@@ -1468,358 +1469,381 @@ fun TodoListScreen(
                     .fillMaxSize()
                     .padding(paddingValues)
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .weight(1f)
-                ) {
-                    if (filteredTasks.isEmpty()) {
-                        // Empty state
+                // Show loading screen while data is being initialized
+                if (isLoading) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.Center
+                    ) {
                         Column(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .padding(32.dp),
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Center
                         ) {
-                            Text(
-                                text = if (dailiesSelected) "No daily tasks yet" else "No tasks yet",
-                                fontSize = 24.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(48.dp),
+                                color = MaterialTheme.colorScheme.primary
                             )
                             Spacer(modifier = Modifier.height(16.dp))
                             Text(
-                                text = if (dailiesSelected) "Tap the + button to add your first daily task" else "Tap the + button to add your first task",
+                                text = "Loading tasks...",
                                 fontSize = 16.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                textAlign = TextAlign.Center
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                    } else {
-                        // Task list with working drag and drop
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(bottom = 56.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                            state = listState
-                        ) {
-                            itemsIndexed(
-                                items = filteredTasks,
-                                key = { _, task -> task.id }
-                            ) { index, task ->
-                                TaskItem(
-                                    task = task,
-                                    index = index,
-                                    totalTasks = filteredTasks.size,
-                                    onDelete = { viewModel.deleteTask(task) },
-                                    onComplete = {
-                                        if (task.isDaily) {
-                                            scope.launch {
-                                                viewModel.markDailyTaskCompleted(task)
-                                            }
-                                        } else {
-                                            viewModel.markTaskCompleted(task)
-                                        }
-                                    },
-                                    onEdit = {
-                                        editingTask = task
-                                        editingTaskPosition = index
-                                        showEditDialog = true
-                                    },
-                                    onToggleDaily = { viewModel.toggleDailyTask(task) }
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .weight(1f)
+                    ) {
+                        if (filteredTasks.isEmpty()) {
+                            // Empty state
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(32.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Text(
+                                    text = if (dailiesSelected) "No daily tasks yet" else "No tasks yet",
+                                    fontSize = 24.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Text(
+                                    text = if (dailiesSelected) "Tap the + button to add your first daily task" else "Tap the + button to add your first task",
+                                    fontSize = 16.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    textAlign = TextAlign.Center
                                 )
                             }
-                        }
-                    }
-
-                    // Compact Start Tasks button at bottom
-                    if (filteredTasks.isNotEmpty()) {
-                        Card(
-                            modifier = Modifier
-                                .align(Alignment.BottomCenter)
-                                .padding(8.dp)
-                                .fillMaxWidth(),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.surface
-                            ),
-                            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Button(
-                                onClick = {
-                                    viewModel.setWasInDailyList(dailiesSelected)
-                                    viewModel.startCurrentTask()
-                                    onNavigateToDo()
-                                },
+                        } else {
+                            // Task list with working drag and drop
+                            LazyColumn(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .background(
-                                        brush = TimerGradient,
-                                        shape = RoundedCornerShape(6.dp)
-                                    )
-                                    .padding(10.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color.Transparent
-                                ),
-                                elevation = ButtonDefaults.buttonElevation(
-                                    defaultElevation = 0.dp
-                                )
+                                    .padding(bottom = 56.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp),
+                                state = listState
                             ) {
-                                Icon(
-                                    Icons.Default.PlayArrow,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "Start Tasks",
-                                    fontSize = 18.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
+                                itemsIndexed(
+                                    items = filteredTasks,
+                                    key = { _, task -> task.id }
+                                ) { index, task ->
+                                    TaskItem(
+                                        task = task,
+                                        index = index,
+                                        totalTasks = filteredTasks.size,
+                                        onDelete = { viewModel.deleteTask(task) },
+                                        onComplete = {
+                                            if (task.isDaily) {
+                                                scope.launch {
+                                                    viewModel.markDailyTaskCompleted(task)
+                                                }
+                                            } else {
+                                                viewModel.markTaskCompleted(task)
+                                            }
+                                        },
+                                        onEdit = {
+                                            editingTask = task
+                                            editingTaskPosition = index
+                                            showEditDialog = true
+                                        },
+                                        onToggleDaily = { viewModel.toggleDailyTask(task) }
+                                    )
+                                }
+                            }
+                        }
+
+                        // Compact Start Tasks button at bottom
+                        if (filteredTasks.isNotEmpty()) {
+                            Card(
+                                modifier = Modifier
+                                    .align(Alignment.BottomCenter)
+                                    .padding(8.dp)
+                                    .fillMaxWidth(),
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.surface
+                                ),
+                                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Button(
+                                    onClick = {
+                                        viewModel.setWasInDailyList(dailiesSelected)
+                                        viewModel.startCurrentTask()
+                                        onNavigateToDo()
+                                    },
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .background(
+                                            brush = TimerGradient,
+                                            shape = RoundedCornerShape(6.dp)
+                                        )
+                                        .padding(10.dp),
+                                    colors = ButtonDefaults.buttonColors(
+                                        containerColor = Color.Transparent
+                                    ),
+                                    elevation = ButtonDefaults.buttonElevation(
+                                        defaultElevation = 0.dp
+                                    )
+                                ) {
+                                    Icon(
+                                        Icons.Default.PlayArrow,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text(
+                                        text = "Start Tasks",
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                }
                             }
                         }
                     }
                 }
             }
-        }
 
-        // Add task dialog
-        if (showAddDialog) {
-            AddTaskDialog(
-                onDismiss = { showAddDialog = false },
-                onAddTask = { title: String, durationSeconds: Int, isDaily: Boolean ->
-                    viewModel.addTask(title, durationSeconds, isDaily, addToTop)
-                    // Don't close the dialog - let it stay open for the next task
-                },
-                isDaily = dailiesSelected,
-                addToTop = addToTop,
-                onAddToTopChange = { addToTop = it }
-            )
-        }
+            // Add task dialog
+            if (showAddDialog) {
+                AddTaskDialog(
+                    onDismiss = { showAddDialog = false },
+                    onAddTask = { title: String, durationSeconds: Int, isDaily: Boolean ->
+                        viewModel.addTask(title, durationSeconds, isDaily, addToTop)
+                        // Don't close the dialog - let it stay open for the next task
+                    },
+                    isDaily = dailiesSelected,
+                    addToTop = addToTop,
+                    onAddToTopChange = { addToTop = it }
+                )
+            }
 
-        // Edit task dialog
-        if (showEditDialog && editingTask != null) {
-            EditTaskDialog(
-                task = editingTask!!,
-                currentPosition = editingTaskPosition,
-                onDismiss = {
-                    showEditDialog = false
-                    editingTask = null
-                },
-                onEditTask = { title: String, durationSeconds: Int, isDaily: Boolean, order: Int ->
-                    viewModel.updateTaskWithOrder(
-                        editingTask!!.copy(
-                            title = title,
-                            durationSeconds = durationSeconds
-                        ), order
-                    )
-                    showEditDialog = false
-                    editingTask = null
-                }
-            )
-        }
-
-        // Rename list dialog
-        if (showRenameDialog && renameListId != null) {
-            AlertDialog(
-                onDismissRequest = { showRenameDialog = false },
-                title = { Text("Rename List") },
-                text = {
-                    OutlinedTextField(
-                        value = renameListValue,
-                        onValueChange = { renameListValue = it },
-                        label = { Text("List Name") },
-                        singleLine = true
-                    )
-                },
-                confirmButton = {
-                    Button(onClick = {
-                        if (renameListValue.text.isNotBlank()) {
-                            val list = taskLists.find { it.id == renameListId }
-                            list?.let { viewModel.updateTaskList(it.copy(name = renameListValue.text)) }
-                            showRenameDialog = false
-                        }
-                    }) {
-                        Text("Save")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showRenameDialog = false }) {
-                        Text("Cancel")
-                    }
-                }
-            )
-        }
-
-        // Add list dialog
-        if (showAddListDialog) {
-            AlertDialog(
-                onDismissRequest = { showAddListDialog = false },
-                title = { Text("Add New List") },
-                text = {
-                    OutlinedTextField(
-                        value = newListName,
-                        onValueChange = { newListName = it },
-                        label = { Text("List Name") },
-                        singleLine = true
-                    )
-                },
-                confirmButton = {
-                    Button(onClick = {
-                        if (newListName.text.isNotBlank()) {
-                            viewModel.addTaskList(newListName.text)
-                            newListName = TextFieldValue("")
-                            showAddListDialog = false
-                        }
-                    }) {
-                        Text("Add")
-                    }
-                },
-                dismissButton = {
-                    TextButton(onClick = { showAddListDialog = false }) {
-                        Text("Cancel")
-                    }
-                }
-            )
-        }
-
-        // Settings dialog
-        if (showSettingsDialog) {
-            AlertDialog(
-                onDismissRequest = { showSettingsDialog = false },
-                title = { Text("Settings") },
-                text = {
-                    Column {
-                        Text("Alarm Sound:")
-                        Spacer(Modifier.height(8.dp))
-                        Button(onClick = { mp3PickerLauncher.launch("audio/mpeg") }) {
-                            Text("Choose MP3 File")
-                        }
-                        if (selectedAudioFile.isNotEmpty()) {
-                            Text(
-                                "Selected: $selectedAudioFile",
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                },
-                confirmButton = {
-                    Button(onClick = { showSettingsDialog = false }) {
-                        Text("Close")
-                    }
-                }
-            )
-        }
-
-        // Sync dialog
-        if (showSyncDialog) {
-            val context = LocalContext.current
-            AlertDialog(
-                onDismissRequest = { showSyncDialog = false },
-                title = { Text("Sync Data") },
-                text = {
-                    Column {
-                        Text("Export your data to copy to the web app, or import data from the web app.")
-                        Spacer(Modifier.height(16.dp))
-
-                        Text("Export Data", fontWeight = FontWeight.Bold)
-                        Text("Click the button below to copy your current data to clipboard.")
-                        Spacer(Modifier.height(8.dp))
-                        Button(
-                            onClick = {
-                                scope.launch {
-                                    val data = viewModel.exportData()
-                                    val clipboard =
-                                        context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                    val clip = android.content.ClipData.newPlainText(
-                                        "DoWithTime Data",
-                                        data
-                                    )
-                                    clipboard.setPrimaryClip(clip)
-                                    showSyncDialog = false
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Export to Clipboard")
-                        }
-
-                        Spacer(Modifier.height(16.dp))
-                        Divider()
-                        Spacer(Modifier.height(16.dp))
-
-                        Text("Import Data", fontWeight = FontWeight.Bold)
-                        Text("Paste data from the web app below to import it here.")
-                        Spacer(Modifier.height(8.dp))
-                        OutlinedTextField(
-                            value = syncData,
-                            onValueChange = { syncData = it },
-                            label = { Text("Paste web app data here") },
-                            modifier = Modifier.fillMaxWidth(),
-                            minLines = 3
+            // Edit task dialog
+            if (showEditDialog && editingTask != null) {
+                EditTaskDialog(
+                    task = editingTask!!,
+                    currentPosition = editingTaskPosition,
+                    onDismiss = {
+                        showEditDialog = false
+                        editingTask = null
+                    },
+                    onEditTask = { title: String, durationSeconds: Int, isDaily: Boolean, order: Int ->
+                        viewModel.updateTaskWithOrder(
+                            editingTask!!.copy(
+                                title = title,
+                                durationSeconds = durationSeconds
+                            ), order
                         )
-                        Spacer(Modifier.height(8.dp))
-                        Button(
-                            onClick = {
-                                if (syncData.isNotBlank()) {
-                                    val success = viewModel.importData(syncData)
-                                    if (success) {
-                                        showSyncDialog = false
-                                        syncData = ""
-                                    }
-                                }
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text("Import Data")
+                        showEditDialog = false
+                        editingTask = null
+                    }
+                )
+            }
+
+            // Rename list dialog
+            if (showRenameDialog && renameListId != null) {
+                AlertDialog(
+                    onDismissRequest = { showRenameDialog = false },
+                    title = { Text("Rename List") },
+                    text = {
+                        OutlinedTextField(
+                            value = renameListValue,
+                            onValueChange = { renameListValue = it },
+                            label = { Text("List Name") },
+                            singleLine = true
+                        )
+                    },
+                    confirmButton = {
+                        Button(onClick = {
+                            if (renameListValue.text.isNotBlank()) {
+                                val list = taskLists.find { it.id == renameListId }
+                                list?.let { viewModel.updateTaskList(it.copy(name = renameListValue.text)) }
+                                showRenameDialog = false
+                            }
+                        }) {
+                            Text("Save")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showRenameDialog = false }) {
+                            Text("Cancel")
                         }
                     }
-                },
-                confirmButton = {
-                    Button(onClick = { showSyncDialog = false }) {
-                        Text("Close")
-                    }
-                }
-            )
-        }
+                )
+            }
 
-        // Move Tasks dialog
-        if (showMoveTasksDialog) {
-            MoveTasksDialog(
-                tasks = if (dailiesSelected) dailyTasks else tasks,
-                onDismiss = { showMoveTasksDialog = false },
-                onMoveTasks = { selectedTasks: List<Task>, targetPosition: Int ->
-                    if (dailiesSelected) {
-                        viewModel.insertDailyTasksAtPosition(selectedTasks, targetPosition)
-                    } else {
-                        viewModel.insertTasksAtPosition(selectedTasks, targetPosition)
+            // Add list dialog
+            if (showAddListDialog) {
+                AlertDialog(
+                    onDismissRequest = { showAddListDialog = false },
+                    title = { Text("Add New List") },
+                    text = {
+                        OutlinedTextField(
+                            value = newListName,
+                            onValueChange = { newListName = it },
+                            label = { Text("List Name") },
+                            singleLine = true
+                        )
+                    },
+                    confirmButton = {
+                        Button(onClick = {
+                            if (newListName.text.isNotBlank()) {
+                                viewModel.addTaskList(newListName.text)
+                                newListName = TextFieldValue("")
+                                showAddListDialog = false
+                            }
+                        }) {
+                            Text("Add")
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showAddListDialog = false }) {
+                            Text("Cancel")
+                        }
                     }
-                    showMoveTasksDialog = false
-                }
-            )
-        }
+                )
+            }
 
-        // Paste to List dialog
-        if (showPasteToListDialog) {
-            PasteToListDialog(
-                sourceListId = pasteSourceListId,
-                sourceIsDaily = pasteSourceIsDaily,
-                taskLists = taskLists,
-                onDismiss = { showPasteToListDialog = false },
-                onPasteTasks = { targetListId: Int, targetPosition: Int ->
-                    viewModel.pasteTasksFromListToPosition(
-                        pasteSourceListId,
-                        pasteSourceIsDaily,
-                        targetListId,
-                        targetPosition
-                    )
-                    showPasteToListDialog = false
-                }
-            )
+            // Settings dialog
+            if (showSettingsDialog) {
+                AlertDialog(
+                    onDismissRequest = { showSettingsDialog = false },
+                    title = { Text("Settings") },
+                    text = {
+                        Column {
+                            Text("Alarm Sound:")
+                            Spacer(Modifier.height(8.dp))
+                            Button(onClick = { mp3PickerLauncher.launch("audio/mpeg") }) {
+                                Text("Choose MP3 File")
+                            }
+                            if (selectedAudioFile.isNotEmpty()) {
+                                Text(
+                                    "Selected: $selectedAudioFile",
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(onClick = { showSettingsDialog = false }) {
+                            Text("Close")
+                        }
+                    }
+                )
+            }
+
+            // Sync dialog
+            if (showSyncDialog) {
+                val context = LocalContext.current
+                AlertDialog(
+                    onDismissRequest = { showSyncDialog = false },
+                    title = { Text("Sync Data") },
+                    text = {
+                        Column {
+                            Text("Export your data to copy to the web app, or import data from the web app.")
+                            Spacer(Modifier.height(16.dp))
+
+                            Text("Export Data", fontWeight = FontWeight.Bold)
+                            Text("Click the button below to copy your current data to clipboard.")
+                            Spacer(Modifier.height(8.dp))
+                            Button(
+                                onClick = {
+                                    scope.launch {
+                                        val data = viewModel.exportData()
+                                        val clipboard =
+                                            context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                        val clip = android.content.ClipData.newPlainText(
+                                            "DoWithTime Data",
+                                            data
+                                        )
+                                        clipboard.setPrimaryClip(clip)
+                                        showSyncDialog = false
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Export to Clipboard")
+                            }
+
+                            Spacer(Modifier.height(16.dp))
+                            Divider()
+                            Spacer(Modifier.height(16.dp))
+
+                            Text("Import Data", fontWeight = FontWeight.Bold)
+                            Text("Paste data from the web app below to import it here.")
+                            Spacer(Modifier.height(8.dp))
+                            OutlinedTextField(
+                                value = syncData,
+                                onValueChange = { syncData = it },
+                                label = { Text("Paste web app data here") },
+                                modifier = Modifier.fillMaxWidth(),
+                                minLines = 3
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            Button(
+                                onClick = {
+                                    if (syncData.isNotBlank()) {
+                                        val success = viewModel.importData(syncData)
+                                        if (success) {
+                                            showSyncDialog = false
+                                            syncData = ""
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text("Import Data")
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(onClick = { showSyncDialog = false }) {
+                            Text("Close")
+                        }
+                    }
+                )
+            }
+
+            // Move Tasks dialog
+            if (showMoveTasksDialog) {
+                MoveTasksDialog(
+                    tasks = if (dailiesSelected) dailyTasks else tasks,
+                    onDismiss = { showMoveTasksDialog = false },
+                    onMoveTasks = { selectedTasks: List<Task>, targetPosition: Int ->
+                        if (dailiesSelected) {
+                            viewModel.insertDailyTasksAtPosition(selectedTasks, targetPosition)
+                        } else {
+                            viewModel.insertTasksAtPosition(selectedTasks, targetPosition)
+                        }
+                        showMoveTasksDialog = false
+                    }
+                )
+            }
+
+            // Paste to List dialog
+            if (showPasteToListDialog) {
+                PasteToListDialog(
+                    sourceListId = pasteSourceListId,
+                    sourceIsDaily = pasteSourceIsDaily,
+                    taskLists = taskLists,
+                    onDismiss = { showPasteToListDialog = false },
+                    onPasteTasks = { targetListId: Int, targetPosition: Int ->
+                        viewModel.pasteTasksFromListToPosition(
+                            pasteSourceListId,
+                            pasteSourceIsDaily,
+                            targetListId,
+                            targetPosition
+                        )
+                        showPasteToListDialog = false
+                    }
+                )
+            }
         }
     }
 }
- 
