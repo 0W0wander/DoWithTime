@@ -42,7 +42,9 @@ class TimerService : Service() {
     
     companion object {
         const val CHANNEL_ID = "TimerChannel"
+        const val ALARM_CHANNEL_ID = "AlarmChannel"
         const val NOTIFICATION_ID = 1
+        const val ALARM_NOTIFICATION_ID = 2
         const val ACTION_START = "START"
         const val ACTION_PAUSE = "PAUSE"
         const val ACTION_STOP = "STOP"
@@ -148,6 +150,12 @@ class TimerService : Service() {
         _showAlarm.value = false
         _isTransitioning.value = false
         stopAlarm()
+        
+        // Cancel both notifications
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        notificationManager.cancel(NOTIFICATION_ID)
+        notificationManager.cancel(ALARM_NOTIFICATION_ID)
+        
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
     }
@@ -165,6 +173,7 @@ class TimerService : Service() {
     private fun showAlarmScreen() {
         _showAlarm.value = true
         playAlarm()
+        showAlarmNotification()
     }
     
     private fun stopAlarm() {
@@ -172,6 +181,10 @@ class TimerService : Service() {
         mediaPlayer?.stop()
         mediaPlayer?.release()
         mediaPlayer = null
+        
+        // Cancel the alarm notification
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        notificationManager.cancel(ALARM_NOTIFICATION_ID)
     }
     
     private fun nextTask() {
@@ -231,7 +244,7 @@ class TimerService : Service() {
     }
     
     private fun createNotificationChannel() {
-        // Timer channel
+        // Timer channel (low priority for ongoing timer)
         val timerChannel = NotificationChannel(
             CHANNEL_ID,
             "Timer",
@@ -244,8 +257,23 @@ class TimerService : Service() {
             setSound(null, null)
         }
         
+        // Alarm channel (high priority for timer completion)
+        val alarmChannel = NotificationChannel(
+            ALARM_CHANNEL_ID,
+            "Timer Alarm",
+            NotificationManager.IMPORTANCE_HIGH
+        ).apply {
+            description = "Timer completion notifications"
+            setShowBadge(true)
+            enableLights(true)
+            enableVibration(true)
+            setSound(android.provider.Settings.System.DEFAULT_ALARM_ALERT_URI, null)
+            setBypassDnd(true) // Show even in Do Not Disturb mode
+        }
+        
         val notificationManager = getSystemService(NotificationManager::class.java)
         notificationManager.createNotificationChannel(timerChannel)
+        notificationManager.createNotificationChannel(alarmChannel)
     }
     
     private fun createNotification(): Notification {
@@ -363,6 +391,48 @@ class TimerService : Service() {
         return builder.build()
     }
     
+    private fun showAlarmNotification() {
+        val task = _currentTask.value
+        
+        val intent = Intent(this, MainActivity::class.java)
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0, intent, PendingIntent.FLAG_IMMUTABLE
+        )
+        
+        val stopAlarmIntent = Intent(this, TimerService::class.java).apply {
+            action = ACTION_STOP_ALARM
+        }
+        val stopAlarmPendingIntent = PendingIntent.getService(
+            this, 5, stopAlarmIntent, PendingIntent.FLAG_IMMUTABLE
+        )
+        
+        val nextTaskIntent = Intent(this, TimerService::class.java).apply {
+            action = ACTION_NEXT_TASK
+        }
+        val nextTaskPendingIntent = PendingIntent.getService(
+            this, 4, nextTaskIntent, PendingIntent.FLAG_IMMUTABLE
+        )
+        
+        val alarmNotification = NotificationCompat.Builder(this, ALARM_CHANNEL_ID)
+            .setContentTitle("⏰ Time's Up!")
+            .setContentText("${task?.title ?: "Task"} time has expired")
+            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setContentIntent(pendingIntent)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setCategory(NotificationCompat.CATEGORY_ALARM)
+            .setAutoCancel(true)
+            .setOngoing(false)
+            .setShowWhen(true)
+            .setOnlyAlertOnce(false)
+            .addAction(R.drawable.ic_alarm_off, "Stop Alarm", stopAlarmPendingIntent)
+            .addAction(R.drawable.ic_next, "Next Task", nextTaskPendingIntent)
+            .setStyle(NotificationCompat.BigTextStyle().bigText("${task?.title ?: "Task"} time has expired. Tap to open the app or use the buttons below."))
+            .build()
+        
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        notificationManager.notify(ALARM_NOTIFICATION_ID, alarmNotification)
+    }
+    
     private fun updateNotification() {
         val notificationManager = getSystemService(NotificationManager::class.java)
         notificationManager.notify(NOTIFICATION_ID, createNotification())
@@ -373,5 +443,10 @@ class TimerService : Service() {
         countDownTimer?.cancel()
         transitionTimer?.cancel()
         stopAlarm()
+        
+        // Cancel all notifications when service is destroyed
+        val notificationManager = getSystemService(NotificationManager::class.java)
+        notificationManager.cancel(NOTIFICATION_ID)
+        notificationManager.cancel(ALARM_NOTIFICATION_ID)
     }
 } 
