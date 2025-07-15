@@ -23,6 +23,7 @@ import com.example.dowithtime.data.SyncStatus
 class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val repository: TaskRepository
     private val cloudSync: CloudSync
+    private val prefs = application.getSharedPreferences("dowithtime_app_state", android.content.Context.MODE_PRIVATE)
     private val _tasks = MutableStateFlow<List<Task>>(emptyList())
     val tasks: StateFlow<List<Task>> = _tasks.asStateFlow()
     
@@ -109,10 +110,33 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             // Don't load all tasks initially - only load incomplete tasks for the current list
             _taskLists.value = repository.getAllTaskLists().first()
             
-            // Set current list to first available list if none is set
-            if (_taskLists.value.isNotEmpty() && _currentListId.value == null) {
-                _currentListId.value = _taskLists.value.first().id
-                // Refresh tasks for the newly set current list
+            // Restore the last selected list and daily list state from SharedPreferences
+            val savedListId = prefs.getInt("last_selected_list_id", -1)
+            val savedWasInDailyList = prefs.getBoolean("was_in_daily_list", false)
+            
+            // Only restore if we weren't in an active session (to avoid resuming tasks)
+            val wasInActiveSession = prefs.getBoolean("was_in_active_session", false)
+            if (!wasInActiveSession) {
+                // Restore daily list state
+                _wasInDailyList.value = savedWasInDailyList
+                
+                // Restore list selection if it's valid
+                if (savedListId != -1 && _taskLists.value.any { it.id == savedListId }) {
+                    _currentListId.value = savedListId
+                } else if (_taskLists.value.isNotEmpty()) {
+                    // Fallback to first available list
+                    _currentListId.value = _taskLists.value.first().id
+                }
+            } else {
+                // If we were in an active session, clear the session flag and use default list
+                prefs.edit().putBoolean("was_in_active_session", false).apply()
+                if (_taskLists.value.isNotEmpty() && _currentListId.value == null) {
+                    _currentListId.value = _taskLists.value.first().id
+                }
+            }
+            
+            // Refresh tasks for the current list
+            if (_currentListId.value != null) {
                 refreshTasksForCurrentList(_currentListId.value)
             }
             
@@ -298,6 +322,9 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     
     fun setCurrentList(listId: Int) {
         _currentListId.value = listId
+        // Save the selected list to SharedPreferences
+        prefs.edit().putInt("last_selected_list_id", listId).apply()
+        refreshTasksForCurrentList(listId)
         viewModelScope.launch {
             uploadToCloud()
         }
@@ -609,6 +636,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                                         stopTimer()
                                         if (_isInActiveSession.value) {
                                             _isInActiveSession.value = false
+                                            // Clear active session state from SharedPreferences
+                                            prefs.edit().putBoolean("was_in_active_session", false).apply()
                                             _onAllTasksCompleted?.invoke()
                                         }
                                     }
@@ -641,6 +670,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             _currentTask.value?.let { task ->
                 // Mark that we're in an active session
                 _isInActiveSession.value = true
+                // Save active session state to SharedPreferences
+                prefs.edit().putBoolean("was_in_active_session", true).apply()
                 // Immediately set the time remaining to the current task's duration
                 _timeRemaining.value = task.durationSeconds * 1000L
                 // Always reset the timer to the current task's duration
@@ -667,6 +698,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         }
         // Reset session flag when manually stopping
         _isInActiveSession.value = false
+        // Clear active session state from SharedPreferences
+        prefs.edit().putBoolean("was_in_active_session", false).apply()
     }
     
     fun resetTimer() {
@@ -712,6 +745,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                     stopTimer()
                     if (_isInActiveSession.value) {
                         _isInActiveSession.value = false
+                        // Clear active session state from SharedPreferences
+                        prefs.edit().putBoolean("was_in_active_session", false).apply()
                         _onAllTasksCompleted?.invoke()
                     }
                 }
@@ -773,6 +808,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             // Only notify if we're in an active session
             if (_isInActiveSession.value) {
                 _isInActiveSession.value = false
+                // Clear active session state from SharedPreferences
+                prefs.edit().putBoolean("was_in_active_session", false).apply()
                 _onAllTasksCompleted?.invoke()
             }
         }
@@ -833,10 +870,14 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     fun selectList(listId: Int) {
         _currentListId.value = listId
         refreshTasksForCurrentList(listId)
+        // Save the selected list to SharedPreferences
+        prefs.edit().putInt("last_selected_list_id", listId).apply()
     }
     
     fun setWasInDailyList(wasInDaily: Boolean) {
         _wasInDailyList.value = wasInDaily
+        // Save the daily list state to SharedPreferences
+        prefs.edit().putBoolean("was_in_daily_list", wasInDaily).apply()
     }
     
     fun pasteTasksFromListToPosition(sourceListId: Int?, isSourceDaily: Boolean, targetListId: Int, targetPosition: Int) {
