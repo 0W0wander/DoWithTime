@@ -33,20 +33,10 @@ fun DoScreen(
     val showAlarm by viewModel.showAlarm.collectAsState()
     val isTransitioning by viewModel.isTransitioning.collectAsState()
     val transitionTime by viewModel.transitionTime.collectAsState()
-    val tasks by viewModel.tasks.collectAsState() // <-- add this line
+    val nextTask by viewModel.nextTask.collectAsState()
     
     // Get the current list ID to force refresh when list changes
     val currentListId by viewModel.currentListId.collectAsState()
-    
-    // Compute the next task for the transition screen
-    val nextTask = remember(currentTask, tasks, isTransitioning, currentListId) {
-        val currentTaskValue = currentTask
-        if (isTransitioning && currentTaskValue != null) {
-            // Show the first task from the current list during transition
-            // Use the current list's tasks, not the stale tasks state
-            tasks.firstOrNull()
-        } else null
-    }
     
     // Double-click detection for skipping transition
     var lastClickTime by remember { mutableStateOf(0L) }
@@ -65,10 +55,10 @@ fun DoScreen(
         viewModel.refreshCurrentTask()
     }
     
-    // Force refresh tasks when transition starts to ensure we have the correct list
+    // Force refresh next task when transition starts to ensure we have the correct next task
     LaunchedEffect(isTransitioning) {
         if (isTransitioning) {
-            viewModel.refreshTasksForCurrentList()
+            viewModel.refreshNextTaskForUI()
         }
     }
     
@@ -98,6 +88,7 @@ fun DoScreen(
         Spacer(modifier = Modifier.height(16.dp))
         // Current task info
         if (isTransitioning && nextTask != null) {
+            val nextTaskValue = nextTask
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -112,7 +103,7 @@ fun DoScreen(
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = nextTask.title,
+                    text = nextTaskValue?.title ?: "",
                     fontSize = 32.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.primary,
@@ -120,7 +111,7 @@ fun DoScreen(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = formatDuration(nextTask.durationSeconds),
+                    text = formatTimerDuration(nextTaskValue?.durationSeconds ?: 0),
                     fontSize = 17.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.align(Alignment.CenterHorizontally)
@@ -149,7 +140,7 @@ fun DoScreen(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = formatDuration(task.durationSeconds),
+                    text = formatTimerDuration(task.durationSeconds),
                     fontSize = 17.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.align(Alignment.CenterHorizontally)
@@ -309,4 +300,10 @@ fun DoScreen(
             )
         }
     }
+}
+
+private fun formatTimerDuration(durationSeconds: Int): String {
+    val minutes = durationSeconds / 60
+    val seconds = durationSeconds % 60
+    return String.format("%02d:%02d", minutes, seconds)
 } 

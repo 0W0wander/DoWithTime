@@ -1,52 +1,11 @@
 # DoWithTime
 
-A productivity app that combines todo lists with timers to help you stay focused and complete tasks on time.
+This Todolist App where each task has a time duration assigned to it has the ability to iterate through tasks[by pressing start tasks button at the bottom] one task at a time, with the timer sounding if you don't complete it in time (i.e if you don't pres next task before the timer is up).
 
 ## Features
 
-### Task Management
-- Create tasks with custom time durations
-- Organize and reorder tasks
-- Mark tasks as completed
-- Delete tasks
-
-### Timer Functionality
-- Big, easy-to-use play button to start tasks
-- Visual countdown timer
-- Pause, resume, and reset functionality
-- Automatic transition between tasks (10-second break)
-
-### Notifications
-- Persistent notification with timer controls
-- Start/pause, stop, and reset from notification bar
-- Real-time timer updates
-
-### Alarm System
-- Loud alarm when time runs out
-- Customizable alarm sounds (coming soon)
-- Forces you to complete tasks on time
-
-## How to Use
-
-1. **Add Tasks**: Tap "Add Task" to create new tasks with time durations
-2. **Organize**: Drag and drop tasks to reorder them
-3. **Start Working**: Tap "Start Tasks" to begin your first task
-4. **Focus**: Use the big play button to start the timer
-5. **Complete**: Mark tasks as done or let the timer run out
-6. **Continue**: Automatically move to the next task
-
-## Technical Details
-
-- Built with Jetpack Compose
-- Room database for task persistence
-- Foreground service for reliable timer functionality
-- Material Design 3 UI components
-- Android 7.0+ (API 24+) support
-
-## Future Enhancements
-
-- Custom alarm sounds
-- Task categories and tags
-- Statistics and progress tracking
-- Dark/light theme toggle
-- Widget support
+- Can create Multiple Lists of Tasks
+- Pasting Lists of tasks into other lists
+- Repeatable tasks
+- Changing Timer audio
+- Exporting/Importing

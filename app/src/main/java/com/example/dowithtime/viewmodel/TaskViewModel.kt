@@ -64,6 +64,9 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
     
+    private val _nextTask = MutableStateFlow<Task?>(null)
+    val nextTask: StateFlow<Task?> = _nextTask.asStateFlow()
+    
     private val _syncStatus = MutableStateFlow<SyncStatus?>(null)
     val syncStatus: StateFlow<SyncStatus?> = _syncStatus.asStateFlow()
     
@@ -507,9 +510,10 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         }
         viewModelScope.launch {
             service.isTransitioning.collect { transitioning ->
+                val wasTransitioning = _isTransitioning.value
                 _isTransitioning.value = transitioning
-                // Only move to next task if we were actually transitioning (not during initialization)
-                if (!transitioning && _isRunning.value) {
+                // Only move to next task if we were actually transitioning and now we're not
+                if (wasTransitioning && !transitioning) {
                     // When transition ends, move to next task
                     moveToNextTask()
                 }
@@ -522,12 +526,40 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         }
         
         // Register broadcast receiver for next task notifications from TimerService
-        val filter = android.content.IntentFilter("com.example.dowithtime.NEXT_TASK")
+        val filter = android.content.IntentFilter().apply {
+            addAction("com.example.dowithtime.NEXT_TASK")
+            addAction("com.example.dowithtime.TRANSITION_FINISHED")
+        }
         nextTaskReceiver = object : android.content.BroadcastReceiver() {
             override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
-                if (intent?.action == "com.example.dowithtime.NEXT_TASK") {
-                    viewModelScope.launch {
-                        nextTask()
+                when (intent?.action) {
+                    "com.example.dowithtime.NEXT_TASK" -> {
+                        viewModelScope.launch {
+                            // When timer expires, mark current task as completed and trigger transition
+                            _currentTask.value?.let { currentTask ->
+                                if (currentTask.isDaily) {
+                                    // For daily tasks, mark as completed for today but don't remove from list
+                                    markDailyTaskCompleted(currentTask)
+                                } else {
+                                    // For regular tasks, mark as completed and remove from list
+                                    markTaskCompleted(currentTask)
+                                    // Small delay to ensure the task list is updated
+                                    kotlinx.coroutines.delay(100)
+                                }
+                                // Start the transition period
+                                timerService?.let { service ->
+                                    val intent = android.content.Intent(getApplication(), TimerService::class.java).apply {
+                                        action = TimerService.ACTION_NEXT_TASK
+                                    }
+                                    getApplication<Application>().startService(intent)
+                                }
+                                uploadToCloud()
+                            }
+                        }
+                    }
+                    "com.example.dowithtime.TRANSITION_FINISHED" -> {
+                        // This is now handled by the isTransitioning flow collection
+                        // No need to duplicate the handling here
                     }
                 }
             }
@@ -594,7 +626,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                     // Small delay to ensure the task list is updated
                     kotlinx.coroutines.delay(100)
                 }
-                // Then trigger the service to handle the transition
+                // Trigger the transition instead of directly moving to next task
                 timerService?.let { service ->
                     val intent = android.content.Intent(getApplication(), TimerService::class.java).apply {
                         action = TimerService.ACTION_NEXT_TASK
@@ -643,15 +675,23 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     }
     
     private suspend fun moveToNextTask() {
-        // Only proceed if the timer is actually running
-        if (!_isRunning.value) {
-            return
+        val nextTask = getNextTask()
+        if (nextTask != null) {
+            _currentTask.value = nextTask
+            _timeRemaining.value = nextTask.durationSeconds * 1000L
+            // Always use startTask to ensure proper timer initialization
+            timerService?.startTask(nextTask)
+        } else {
+            stopTimer()
         }
+    }
+    
+    // Method to get the next task (for transition screen)
+    suspend fun getNextTask(): Task? {
+        // Check if we should be working with daily tasks based on the remembered state
+        val shouldWorkWithDailyTasks = _wasInDailyList.value
         
-        // Check if we're working with daily tasks based on the remembered state
-        val isWorkingWithDailyTasks = _wasInDailyList.value
-        
-        val nextTask = if (isWorkingWithDailyTasks) {
+        val nextTask = if (shouldWorkWithDailyTasks) {
             // For daily tasks, get the latest data directly from the database
             // and find the first uncompleted daily task
             val latestDailyTasks = repository.getAllDailyTasks().first()
@@ -661,50 +701,27 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             // Force refresh the task list to ensure we have the latest data
             val currentListId = _currentListId.value ?: _taskLists.value.firstOrNull()?.id ?: 1
             val currentTasks = repository.getIncompleteTasksByList(currentListId).first()
-            // Also update the _tasks.value to keep it in sync
-            _tasks.value = currentTasks
             // Filter out daily tasks that are completed for today
             currentTasks.firstOrNull { task -> 
                 !task.isDaily || !task.completedToday 
             }
         }
         
-        if (nextTask != null) {
-            _currentTask.value = nextTask
-            // Set the time remaining to the next task's duration
-            _timeRemaining.value = nextTask.durationSeconds * 1000L
-            // Update the TimerService with the new task and its duration
-            timerService?.updateTask(nextTask)
-            // Start the timer for the NEW task automatically
-            timerService?.startTask(nextTask)
-        } else {
-            // No more tasks, stop the timer
-            stopTimer()
+        // Update the StateFlow for UI consumption
+        _nextTask.value = nextTask
+        return nextTask
+    }
+    
+    // Method to refresh the next task for UI
+    fun refreshNextTaskForUI() {
+        viewModelScope.launch {
+            getNextTask()
         }
     }
     
     // Method to refresh current task from database
     suspend fun refreshCurrentTask() {
-        // Check if we should be working with daily tasks based on the remembered state
-        val shouldWorkWithDailyTasks = _wasInDailyList.value
-        
-        val firstTask = if (shouldWorkWithDailyTasks) {
-            // For daily tasks, get the latest data directly from the database
-            // and find the first uncompleted daily task
-            val latestDailyTasks = repository.getAllDailyTasks().first()
-            latestDailyTasks.firstOrNull { !it.completedToday }
-        } else {
-            // For regular tasks, find the first incomplete task from the current list
-            // Force refresh the task list to ensure we have the latest data
-            val currentListId = _currentListId.value ?: _taskLists.value.firstOrNull()?.id ?: 1
-            val currentTasks = repository.getIncompleteTasksByList(currentListId).first()
-            // Also update the _tasks.value to keep it in sync
-            _tasks.value = currentTasks
-            // Filter out daily tasks that are completed for today
-            currentTasks.firstOrNull { task -> 
-                !task.isDaily || !task.completedToday 
-            }
-        }
+        val firstTask = getNextTask()
         
         _currentTask.value = firstTask
         // Set the time remaining to the current task's duration

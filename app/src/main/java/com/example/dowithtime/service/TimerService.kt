@@ -50,6 +50,7 @@ class TimerService : Service() {
         const val ACTION_NEXT_TASK = "NEXT_TASK"
         const val ACTION_SKIP_TRANSITION = "SKIP_TRANSITION"
         const val ACTION_STOP_ALARM = "STOP_ALARM"
+        const val ACTION_TRANSITION_FINISHED = "TRANSITION_FINISHED"
     }
     
     inner class TimerBinder : Binder() {
@@ -81,10 +82,12 @@ class TimerService : Service() {
     fun startTask(task: Task) {
         // Stop any existing timer first
         countDownTimer?.cancel()
+        transitionTimer?.cancel()
         _isRunning.value = false
         _isPaused.value = false
         
         _currentTask.value = task
+        // Always ensure we use the task's actual duration
         _timeRemaining.value = task.durationSeconds * 1000L
         _showAlarm.value = false
         _isTransitioning.value = false
@@ -106,19 +109,24 @@ class TimerService : Service() {
         _isRunning.value = true
         _isPaused.value = false
         
-        countDownTimer = object : CountDownTimer(_timeRemaining.value, 1000) {
-            override fun onTick(millisUntilFinished: Long) {
-                _timeRemaining.value = millisUntilFinished
-                updateNotification()
-            }
-            
-            override fun onFinish() {
-                _timeRemaining.value = 0
-                _isRunning.value = false
-                showAlarmScreen()
-                updateNotification()
-            }
-        }.start()
+        // Always use the current task's duration, never fall back to timeRemaining
+        val durationToUse = _currentTask.value?.durationSeconds?.let { it * 1000L } ?: 0L
+        
+        if (durationToUse > 0) {
+            countDownTimer = object : CountDownTimer(durationToUse, 1000) {
+                override fun onTick(millisUntilFinished: Long) {
+                    _timeRemaining.value = millisUntilFinished
+                    updateNotification()
+                }
+                
+                override fun onFinish() {
+                    _timeRemaining.value = 0
+                    _isRunning.value = false
+                    showAlarmScreen()
+                    updateNotification()
+                }
+            }.start()
+        }
     }
     
     private fun pauseTimer() {
@@ -172,6 +180,10 @@ class TimerService : Service() {
         val intent = Intent("com.example.dowithtime.NEXT_TASK")
         sendBroadcast(intent)
         
+        // Reset the timer state to prepare for the next task
+        _isRunning.value = false
+        _isPaused.value = false
+        
         if (_isTransitioning.value) {
             // If already transitioning, skip the transition entirely
             skipTransition()
@@ -183,7 +195,9 @@ class TimerService : Service() {
     private fun skipTransition() {
         transitionTimer?.cancel()
         _isTransitioning.value = false
-        // The ViewModel will handle moving to the next task
+        // Send broadcast to notify ViewModel to handle next task
+        val intent = Intent("com.example.dowithtime.TRANSITION_FINISHED")
+        sendBroadcast(intent)
         updateNotification()
     }
     
@@ -199,7 +213,9 @@ class TimerService : Service() {
             
             override fun onFinish() {
                 _isTransitioning.value = false
-                // The ViewModel will handle moving to the next task
+                // Send broadcast to notify ViewModel to handle next task
+                val intent = Intent("com.example.dowithtime.TRANSITION_FINISHED")
+                sendBroadcast(intent)
                 updateNotification()
             }
         }.start()
