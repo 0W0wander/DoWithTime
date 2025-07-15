@@ -50,15 +50,26 @@ fun DoScreen(
         }
     }
     
-    // Refresh current task when screen is displayed
+    // Refresh current task when screen is displayed and set up callback
     LaunchedEffect(Unit) {
         viewModel.refreshCurrentTask()
+        viewModel.setOnAllTasksCompletedCallback {
+            onNavigateBack()
+        }
     }
     
     // Force refresh next task when transition starts to ensure we have the correct next task
     LaunchedEffect(isTransitioning) {
         if (isTransitioning) {
             viewModel.refreshNextTaskForUI()
+        }
+    }
+    
+    // Immediately navigate back if there are no tasks to do
+    LaunchedEffect(currentTask) {
+        if (currentTask == null) {
+            onNavigateBack()
+            return@LaunchedEffect
         }
     }
     
@@ -144,25 +155,6 @@ fun DoScreen(
                     fontSize = 17.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.align(Alignment.CenterHorizontally)
-                )
-            }
-        } ?: run {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = "No tasks available",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Medium
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = "Add some tasks first!",
-                    fontSize = 14.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }

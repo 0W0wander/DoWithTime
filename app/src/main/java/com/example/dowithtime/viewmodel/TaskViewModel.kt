@@ -52,6 +52,16 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     
     private var timerService: TimerService? = null
     
+    // Add callback for when all tasks are completed
+    private var _onAllTasksCompleted: (() -> Unit)? = null
+    private var _isInActiveSession = MutableStateFlow(false)
+    
+    fun setOnAllTasksCompletedCallback(callback: () -> Unit) {
+        _onAllTasksCompleted = callback
+    }
+    
+    val isInActiveSession: StateFlow<Boolean> = _isInActiveSession.asStateFlow()
+
     // Multi-list support
     private val _taskLists = MutableStateFlow<List<TaskList>>(emptyList())
     val taskLists: StateFlow<List<TaskList>> = _taskLists.asStateFlow()
@@ -616,6 +626,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             refreshCurrentTask()
             
             _currentTask.value?.let { task ->
+                // Mark that we're in an active session
+                _isInActiveSession.value = true
                 // Immediately set the time remaining to the current task's duration
                 _timeRemaining.value = task.durationSeconds * 1000L
                 // Always reset the timer to the current task's duration
@@ -640,6 +652,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             }
             getApplication<Application>().startService(intent)
         }
+        // Reset session flag when manually stopping
+        _isInActiveSession.value = false
     }
     
     fun resetTimer() {
@@ -731,6 +745,11 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         } else {
             println("DEBUG: No next task found, stopping timer")
             stopTimer()
+            // Only notify if we're in an active session
+            if (_isInActiveSession.value) {
+                _isInActiveSession.value = false
+                _onAllTasksCompleted?.invoke()
+            }
         }
     }
     
