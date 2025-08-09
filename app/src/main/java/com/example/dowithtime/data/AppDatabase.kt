@@ -6,8 +6,8 @@ import androidx.room.RoomDatabase
 import android.content.Context
 
 @Database(
-    entities = [Task::class, TaskList::class], 
-    version = 6
+    entities = [Task::class, TaskList::class, DailySummary::class], 
+    version = 7
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun taskDao(): TaskDao

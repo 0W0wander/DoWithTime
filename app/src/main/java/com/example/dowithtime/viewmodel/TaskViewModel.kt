@@ -7,6 +7,7 @@ import com.example.dowithtime.data.AppDatabase
 import com.example.dowithtime.data.Task
 import com.example.dowithtime.data.TaskRepository
 import com.example.dowithtime.data.TaskList
+import com.example.dowithtime.data.DailySummary
 import com.example.dowithtime.service.TimerService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -80,6 +81,13 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     
     private val _syncStatus = MutableStateFlow<SyncStatus?>(null)
     val syncStatus: StateFlow<SyncStatus?> = _syncStatus.asStateFlow()
+
+    // CTDAD: today's total and history
+    private val _todayTotalSeconds = MutableStateFlow(0)
+    val todayTotalSeconds: StateFlow<Int> = _todayTotalSeconds.asStateFlow()
+
+    private val _dailySummaries = MutableStateFlow<List<DailySummary>>(emptyList())
+    val dailySummaries: StateFlow<List<DailySummary>> = _dailySummaries.asStateFlow()
     
     init {
         val database = AppDatabase.getDatabase(application)
@@ -103,6 +111,18 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         
         loadData()
         performAutoSync()
+
+        // Initialize CTDAD tracking
+        viewModelScope.launch {
+            val today = getTodayDateString()
+            repository.ensureDailySummary(today)
+            repository.getDailySummaries().collect { summaries ->
+                _dailySummaries.value = summaries
+                val todayDate = getTodayDateString()
+                val todaySummary = summaries.firstOrNull { it.date == todayDate }
+                _todayTotalSeconds.value = todaySummary?.totalSeconds ?: 0
+            }
+        }
     }
     
     private fun loadData() {
@@ -206,6 +226,19 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         
         // Refresh tasks for the current list to show only incomplete tasks
         refreshTasksForCurrentList(_currentListId.value)
+    }
+
+    // Helpers for CTDAD
+    private fun getTodayDateString(): String {
+        val formatter = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault())
+        return formatter.format(java.util.Date())
+    }
+
+    private suspend fun addToTodayCtdad(seconds: Int) {
+        if (seconds <= 0) return
+        val today = getTodayDateString()
+        repository.ensureDailySummary(today)
+        repository.addToDailyTotal(today, seconds)
     }
     
     fun addTask(title: String, durationSeconds: Int, isDaily: Boolean = false, addToTop: Boolean = false) {
@@ -384,6 +417,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     fun markTaskCompleted(task: Task) {
         viewModelScope.launch {
             repository.markTaskCompleted(task.id)
+            addToTodayCtdad(task.durationSeconds)
             // Refresh tasks for the current list after marking as completed
             refreshTasksForCurrentList(_currentListId.value)
             uploadToCloud()
@@ -392,6 +426,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     
     suspend fun markDailyTaskCompleted(task: Task) {
         repository.markDailyTaskCompleted(task.id)
+        addToTodayCtdad(task.durationSeconds)
         // Refresh daily tasks to get updated completion status
         refreshDailyTasks()
         uploadToCloud()
@@ -585,7 +620,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         nextTaskReceiver = object : android.content.BroadcastReceiver() {
             override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
                 println("DEBUG: Broadcast received: ${intent?.action}")
-                when (intent?.action) {
+                        when (intent?.action) {
                     "com.example.dowithtime.NEXT_TASK" -> {
                         viewModelScope.launch {
                             // When timer expires, mark current task as completed and trigger transition
@@ -593,24 +628,14 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                                 val wasShowingAlarm = _showAlarm.value
                                 println("DEBUG: NEXT_TASK broadcast received, wasShowingAlarm: $wasShowingAlarm")
                                 
-                                if (currentTask.isDaily) {
-                                    // For daily tasks, mark as completed for today but don't remove from list
-                                    markDailyTaskCompleted(currentTask)
-                                } else {
-                                    // For regular tasks, mark as completed and remove from list
-                                    println("DEBUG: Marking task ${currentTask.id} (${currentTask.title}) as completed")
-                                    repository.markTaskCompleted(currentTask.id)
-                                    println("DEBUG: Task marked as completed, refreshing task list")
-                                    // Force refresh the task list to ensure it's updated
-                                    refreshTasksForCurrentList(_currentListId.value)
-                                    // Force a fresh database query to ensure we have the latest data
-                                    val currentListId = _currentListId.value ?: _taskLists.value.firstOrNull()?.id ?: 1
-                                    val freshTasks = repository.getIncompleteTasksByList(currentListId).first()
-                                    println("DEBUG: Fresh incomplete tasks after marking completed: ${freshTasks.map { "${it.title} (completed: ${it.isCompleted})" }}")
-                                    
-                                    // Update the tasks state with the fresh data
-                                    _tasks.value = freshTasks
-                                }
+                                        if (currentTask.isDaily) {
+                                            // For daily tasks, mark as completed for today but don't remove from list
+                                            markDailyTaskCompleted(currentTask)
+                                        } else {
+                                            // For regular tasks, mark as completed and remove from list
+                                            println("DEBUG: Marking task ${currentTask.id} (${currentTask.title}) as completed")
+                                            markTaskCompleted(currentTask)
+                                        }
                                 
                                 // Check if we were showing an alarm (timer just finished)
                                 // If so, move directly to next task instead of starting transition
@@ -642,7 +667,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                                         }
                                     }
                                 }
-                                uploadToCloud()
+                                        uploadToCloud()
                             }
                         }
                     }

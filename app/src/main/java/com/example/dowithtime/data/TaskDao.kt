@@ -37,6 +37,19 @@ interface TaskDao {
     
     @Query("UPDATE tasks SET completed_today = 0 WHERE is_daily = 1")
     suspend fun resetDailyTaskCompletion()
+
+    // Daily summaries (CTDAD)
+    @Query("SELECT * FROM daily_summaries ORDER BY date DESC")
+    fun getDailySummaries(): Flow<List<DailySummary>>
+
+    @Query("SELECT * FROM daily_summaries WHERE date = :date LIMIT 1")
+    fun getSummaryByDate(date: String): Flow<DailySummary?>
+
+    @Query("INSERT OR IGNORE INTO daily_summaries(date, total_seconds) VALUES(:date, 0)")
+    suspend fun ensureDailySummary(date: String)
+
+    @Query("UPDATE daily_summaries SET total_seconds = total_seconds + :seconds WHERE date = :date")
+    suspend fun addToDailyTotal(date: String, seconds: Int)
     
     // TaskList methods
     @Query("SELECT * FROM task_lists")

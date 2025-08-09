@@ -89,4 +89,10 @@ class TaskRepository(private val taskDao: TaskDao) {
     suspend fun insertAllTaskLists(taskLists: List<TaskList>) {
         taskDao.insertAllTaskLists(taskLists)
     }
+
+    // Daily summaries (CTDAD)
+    fun getDailySummaries(): Flow<List<DailySummary>> = taskDao.getDailySummaries()
+    fun getSummaryByDate(date: String): Flow<DailySummary?> = taskDao.getSummaryByDate(date)
+    suspend fun ensureDailySummary(date: String) = taskDao.ensureDailySummary(date)
+    suspend fun addToDailyTotal(date: String, seconds: Int) = taskDao.addToDailyTotal(date, seconds)
 } 

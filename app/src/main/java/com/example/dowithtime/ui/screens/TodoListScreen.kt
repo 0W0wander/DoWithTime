@@ -1211,6 +1211,8 @@ fun TodoListScreen(
 ) {
     val tasks by viewModel.tasks.collectAsState()
     val dailyTasks by viewModel.dailyTasks.collectAsState()
+    val todayTotalSeconds by viewModel.todayTotalSeconds.collectAsState()
+    val summaries by viewModel.dailySummaries.collectAsState()
     val taskLists by viewModel.taskLists.collectAsState()
     val currentListId by viewModel.currentListId.collectAsState()
     val wasInDailyList by viewModel.wasInDailyList.collectAsState()
@@ -1234,20 +1236,23 @@ fun TodoListScreen(
     // Add to top checkbox state
     var addToTop by rememberSaveable { mutableStateOf(false) }
 
-    // Dailies selection state
-    var dailiesSelected by remember { mutableStateOf(wasInDailyList) }
+    // History selection state (replaces Dailies page)
+    var historySelected by remember { mutableStateOf(false) }
+    // Dailies flag retained but disabled in UI
+    var dailiesSelected by remember { mutableStateOf(false) }
 
     // Update dailiesSelected when wasInDailyList changes
-    LaunchedEffect(wasInDailyList) {
-        dailiesSelected = wasInDailyList
+    LaunchedEffect(Unit) {
+        dailiesSelected = false
+        viewModel.setWasInDailyList(false)
     }
 
     // Drawer state
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     val scope = rememberCoroutineScope()
 
-    // Filter tasks for Dailies or selected list
-    val filteredTasks = if (dailiesSelected) dailyTasks else tasks
+    // Filter tasks for Dailies or selected list (Dailies disabled)
+    val filteredTasks = tasks
 
 
     var showSettingsDialog by remember { mutableStateOf(false) }
@@ -1269,47 +1274,22 @@ fun TodoListScreen(
         drawerState = drawerState,
         drawerContent = {
             ModalDrawerSheet {
-                // Dailies section
+                // CTDAD History section
                 Text(
-                    text = "Dailies",
+                    text = "History",
                     fontWeight = FontWeight.Bold,
                     fontSize = 18.sp,
                     modifier = Modifier.padding(16.dp)
                 )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    NavigationDrawerItem(
-                        label = {
-                            Text(
-                                "Dailies",
-                                fontWeight = if (dailiesSelected) FontWeight.Bold else FontWeight.Normal
-                            )
-                        },
-                        selected = dailiesSelected,
-                        onClick = {
-                            dailiesSelected = true
-                            viewModel.setWasInDailyList(true)
-                            scope.launch { drawerState.close() }
-                        },
-                        modifier = Modifier.weight(1f)
-                    )
-                    IconButton(
-                        onClick = {
-                            pasteSourceIsDaily = true
-                            pasteSourceListId = null
-                            showPasteToListDialog = true
-                            scope.launch { drawerState.close() }
-                        }
-                    ) {
-                        Icon(
-                            Icons.Default.MoreVert,
-                            contentDescription = "Paste Dailies to other list",
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
+                NavigationDrawerItem(
+                    label = { Text("CTDAD History") },
+                    selected = historySelected,
+                    onClick = {
+                        historySelected = true
+                        scope.launch { drawerState.close() }
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                )
                 Divider(modifier = Modifier.padding(vertical = 8.dp))
                 // User lists
                 Text(
@@ -1355,6 +1335,7 @@ fun TodoListScreen(
                             },
                             selected = !dailiesSelected && list.id == currentListId,
                             onClick = {
+                                historySelected = false
                                 dailiesSelected = false
                                 viewModel.setWasInDailyList(false)
                                 viewModel.selectList(list.id)
@@ -1443,7 +1424,7 @@ fun TodoListScreen(
                 TopAppBar(
                     title = {
                         Text(
-                            text = if (dailiesSelected) "Dailies" else taskLists.find { it.id == currentListId }?.name
+                            text = if (historySelected) "CTDAD History" else taskLists.find { it.id == currentListId }?.name
                                 ?: "Tasks",
                             fontWeight = FontWeight.Bold
                         )
@@ -1469,6 +1450,28 @@ fun TodoListScreen(
                     .fillMaxSize()
                     .padding(paddingValues)
             ) {
+                // Header: Today's Completed Time (CTDAD)
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                    shape = RoundedCornerShape(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Completed Today", fontWeight = FontWeight.Bold)
+                        val hours = todayTotalSeconds / 3600
+                        val minutes = (todayTotalSeconds % 3600) / 60
+                        Text(String.format("%02d:%02d", hours, minutes), fontWeight = FontWeight.Bold)
+                    }
+                }
                 // Show loading screen while data is being initialized
                 if (isLoading) {
                     Box(
@@ -1497,7 +1500,7 @@ fun TodoListScreen(
                             .fillMaxSize()
                             .weight(1f)
                     ) {
-                        if (filteredTasks.isEmpty()) {
+                        if (!historySelected && filteredTasks.isEmpty()) {
                             // Empty state
                             Column(
                                 modifier = Modifier
@@ -1521,45 +1524,81 @@ fun TodoListScreen(
                                 )
                             }
                         } else {
-                            // Task list with working drag and drop
-                            LazyColumn(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(bottom = 56.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp),
-                                state = listState
-                            ) {
-                                itemsIndexed(
-                                    items = filteredTasks,
-                                    key = { _, task -> task.id }
-                                ) { index, task ->
-                                    TaskItem(
-                                        task = task,
-                                        index = index,
-                                        totalTasks = filteredTasks.size,
-                                        onDelete = { viewModel.deleteTask(task) },
-                                        onComplete = {
-                                            if (task.isDaily) {
-                                                scope.launch {
-                                                    viewModel.markDailyTaskCompleted(task)
-                                                }
-                                            } else {
-                                                viewModel.markTaskCompleted(task)
+                            if (historySelected) {
+                                // Show CTDAD history (previous days)
+                                val todayStr = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.getDefault()).format(java.util.Date())
+                                val previous = summaries.filter { it.date != todayStr }
+                                LazyColumn(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(bottom = 56.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    items(previous) { summary ->
+                                        Card(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(horizontal = 12.dp),
+                                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                                            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                                            shape = RoundedCornerShape(8.dp)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .padding(12.dp),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(summary.date, fontWeight = FontWeight.Medium)
+                                                val h = summary.totalSeconds / 3600
+                                                val m = (summary.totalSeconds % 3600) / 60
+                                                Text(String.format("%02d:%02d", h, m), fontWeight = FontWeight.Bold)
                                             }
-                                        },
-                                        onEdit = {
-                                            editingTask = task
-                                            editingTaskPosition = index
-                                            showEditDialog = true
-                                        },
-                                        onToggleDaily = { viewModel.toggleDailyTask(task) }
-                                    )
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Task list with working drag and drop
+                                LazyColumn(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(bottom = 56.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                                    state = listState
+                                ) {
+                                    itemsIndexed(
+                                        items = filteredTasks,
+                                        key = { _, task -> task.id }
+                                    ) { index, task ->
+                                        TaskItem(
+                                            task = task,
+                                            index = index,
+                                            totalTasks = filteredTasks.size,
+                                            onDelete = { viewModel.deleteTask(task) },
+                                            onComplete = {
+                                                if (task.isDaily) {
+                                                    scope.launch {
+                                                        viewModel.markDailyTaskCompleted(task)
+                                                    }
+                                                } else {
+                                                    viewModel.markTaskCompleted(task)
+                                                }
+                                            },
+                                            onEdit = {
+                                                editingTask = task
+                                                editingTaskPosition = index
+                                                showEditDialog = true
+                                            },
+                                            onToggleDaily = { viewModel.toggleDailyTask(task) }
+                                        )
+                                    }
                                 }
                             }
                         }
 
                         // Compact Start Tasks button at bottom
-                        if (filteredTasks.isNotEmpty()) {
+                        if (!historySelected && filteredTasks.isNotEmpty()) {
                             Card(
                                 modifier = Modifier
                                     .align(Alignment.BottomCenter)
