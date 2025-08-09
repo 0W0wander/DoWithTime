@@ -88,6 +88,12 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _dailySummaries = MutableStateFlow<List<DailySummary>>(emptyList())
     val dailySummaries: StateFlow<List<DailySummary>> = _dailySummaries.asStateFlow()
+
+    // Settings: show CTDAD bar and use actual time tracking
+    private val _showCtdadBar = MutableStateFlow(true)
+    val showCtdadBar: StateFlow<Boolean> = _showCtdadBar.asStateFlow()
+    private val _useActualTimeForCtdad = MutableStateFlow(false)
+    val useActualTimeForCtdad: StateFlow<Boolean> = _useActualTimeForCtdad.asStateFlow()
     
     init {
         val database = AppDatabase.getDatabase(application)
@@ -123,6 +129,10 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 _todayTotalSeconds.value = todaySummary?.totalSeconds ?: 0
             }
         }
+
+        // Load settings
+        _showCtdadBar.value = prefs.getBoolean("show_ctdad_bar", true)
+        _useActualTimeForCtdad.value = prefs.getBoolean("use_actual_time_ctdad", false)
     }
     
     private fun loadData() {
@@ -239,6 +249,26 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         val today = getTodayDateString()
         repository.ensureDailySummary(today)
         repository.addToDailyTotal(today, seconds)
+    }
+
+    private fun computeCtdadSecondsFor(task: Task): Int {
+        return if (_useActualTimeForCtdad.value && _isInActiveSession.value) {
+            val remainingSeconds = (_timeRemaining.value / 1000L).toInt()
+            val spent = task.durationSeconds - remainingSeconds
+            spent.coerceIn(0, task.durationSeconds)
+        } else {
+            task.durationSeconds
+        }
+    }
+
+    fun setShowCtdadBar(show: Boolean) {
+        _showCtdadBar.value = show
+        prefs.edit().putBoolean("show_ctdad_bar", show).apply()
+    }
+
+    fun setUseActualTimeForCtdad(useActual: Boolean) {
+        _useActualTimeForCtdad.value = useActual
+        prefs.edit().putBoolean("use_actual_time_ctdad", useActual).apply()
     }
     
     fun addTask(title: String, durationSeconds: Int, isDaily: Boolean = false, addToTop: Boolean = false) {
@@ -417,7 +447,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     fun markTaskCompleted(task: Task) {
         viewModelScope.launch {
             repository.markTaskCompleted(task.id)
-            addToTodayCtdad(task.durationSeconds)
+            val secondsToAdd = computeCtdadSecondsFor(task)
+            addToTodayCtdad(secondsToAdd)
             // Refresh tasks for the current list after marking as completed
             refreshTasksForCurrentList(_currentListId.value)
             uploadToCloud()
@@ -426,7 +457,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     
     suspend fun markDailyTaskCompleted(task: Task) {
         repository.markDailyTaskCompleted(task.id)
-        addToTodayCtdad(task.durationSeconds)
+        val secondsToAdd = computeCtdadSecondsFor(task)
+        addToTodayCtdad(secondsToAdd)
         // Refresh daily tasks to get updated completion status
         refreshDailyTasks()
         uploadToCloud()

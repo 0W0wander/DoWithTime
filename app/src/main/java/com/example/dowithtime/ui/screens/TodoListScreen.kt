@@ -58,6 +58,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import com.example.dowithtime.ui.theme.*
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.toArgb
@@ -1213,6 +1214,7 @@ fun TodoListScreen(
     val dailyTasks by viewModel.dailyTasks.collectAsState()
     val todayTotalSeconds by viewModel.todayTotalSeconds.collectAsState()
     val summaries by viewModel.dailySummaries.collectAsState()
+    val showCtdadBar by viewModel.showCtdadBar.collectAsState()
     val taskLists by viewModel.taskLists.collectAsState()
     val currentListId by viewModel.currentListId.collectAsState()
     val wasInDailyList by viewModel.wasInDailyList.collectAsState()
@@ -1398,7 +1400,7 @@ fun TodoListScreen(
                     Text("Move Tasks")
                 }
                 Spacer(modifier = Modifier.height(16.dp))
-                // Settings button
+                // Settings button (stays accessible via drawer)
                 Button(
                     onClick = { showSettingsDialog = true },
                     modifier = Modifier
@@ -1423,25 +1425,25 @@ fun TodoListScreen(
             topBar = {
                 TopAppBar(
                     title = {
-                        Text(
-                            text = if (historySelected) "CTDAD History" else taskLists.find { it.id == currentListId }?.name
-                                ?: "Tasks",
-                            fontWeight = FontWeight.Bold
-                        )
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
-                            Icon(Icons.Default.Menu, contentDescription = "Menu")
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Text(
+                                text = if (historySelected) "CTDAD History" else taskLists.find { it.id == currentListId }?.name
+                                    ?: "Tasks",
+                                fontWeight = FontWeight.Bold
+                            )
+                            if (showCtdadBar && !historySelected) {
+                                val hours = todayTotalSeconds / 3600
+                                val minutes = (todayTotalSeconds % 3600) / 60
+                                Text(String.format("%02d:%02d", hours, minutes), fontWeight = FontWeight.Bold)
+                            }
                         }
                     },
-                    actions = {
-                        IconButton(onClick = { showSyncDialog = true }) {
-                            Icon(Icons.Default.Settings, contentDescription = "Sync")
-                        }
-                        IconButton(onClick = { showAddDialog = true }) {
-                            Icon(Icons.Default.Add, contentDescription = "Add Task")
-                        }
-                    }
+                    navigationIcon = {},
+                    actions = {}
                 )
             }
         ) { paddingValues ->
@@ -1450,28 +1452,7 @@ fun TodoListScreen(
                     .fillMaxSize()
                     .padding(paddingValues)
             ) {
-                // Header: Today's Completed Time (CTDAD)
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-                    shape = RoundedCornerShape(10.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Text("Completed Today", fontWeight = FontWeight.Bold)
-                        val hours = todayTotalSeconds / 3600
-                        val minutes = (todayTotalSeconds % 3600) / 60
-                        Text(String.format("%02d:%02d", hours, minutes), fontWeight = FontWeight.Bold)
-                    }
-                }
+                // Removed in favor of top bar CTDAD display
                 // Show loading screen while data is being initialized
                 if (isLoading) {
                     Box(
@@ -1755,6 +1736,23 @@ fun TodoListScreen(
                     title = { Text("Settings") },
                     text = {
                         Column {
+                            // CTDAD visibility toggle
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Checkbox(checked = showCtdadBar, onCheckedChange = { viewModel.setShowCtdadBar(it) })
+                                Spacer(Modifier.width(8.dp))
+                                Text("Show CTDAD in top bar")
+                            }
+                            Spacer(Modifier.height(8.dp))
+                            // Actual time vs planned duration
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                val useActual by viewModel.useActualTimeForCtdad.collectAsState()
+                                Checkbox(checked = useActual, onCheckedChange = { viewModel.setUseActualTimeForCtdad(it) })
+                                Spacer(Modifier.width(8.dp))
+                                Text("Use actual time spent for CTDAD")
+                            }
+                            Spacer(Modifier.height(16.dp))
+                            Divider()
+                            Spacer(Modifier.height(16.dp))
                             Text("Alarm Sound:")
                             Spacer(Modifier.height(8.dp))
                             Button(onClick = { mp3PickerLauncher.launch("audio/mpeg") }) {
@@ -1882,6 +1880,35 @@ fun TodoListScreen(
                         showPasteToListDialog = false
                     }
                 )
+            }
+            // Floating add button bottom-right
+            if (!historySelected) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(16.dp)
+                    ) {
+                        Card(
+                            modifier = Modifier
+                                .size(56.dp)
+                                .clickable { showAddDialog = true },
+                            shape = CircleShape,
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                        ) {
+                            Box(
+                                modifier = Modifier.fillMaxSize(),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text("+", color = Color.White, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                            }
+                        }
+                    }
+                }
             }
         }
     }
