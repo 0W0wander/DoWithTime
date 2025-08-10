@@ -26,6 +26,7 @@ fun DoScreen(
     viewModel: TaskViewModel,
     onNavigateBack: () -> Unit
 ) {
+    val timersDisabled by viewModel.disableTimers.collectAsState()
     val currentTask by viewModel.currentTask.collectAsState()
     val timeRemaining by viewModel.timeRemaining.collectAsState()
     val isRunning by viewModel.isRunning.collectAsState()
@@ -34,6 +35,7 @@ fun DoScreen(
     val isTransitioning by viewModel.isTransitioning.collectAsState()
     val transitionTime by viewModel.transitionTime.collectAsState()
     val nextTask by viewModel.nextTask.collectAsState()
+    val todayTotalSeconds by viewModel.todayTotalSeconds.collectAsState()
     
     // Get the current list ID to force refresh when list changes
     val currentListId by viewModel.currentListId.collectAsState()
@@ -96,6 +98,16 @@ fun DoScreen(
             fontWeight = FontWeight.Bold,
             modifier = Modifier.align(Alignment.CenterHorizontally)
         )
+        Spacer(modifier = Modifier.height(8.dp))
+        // Show CTDAD live value
+        val cHrs = todayTotalSeconds / 3600
+        val cMin = (todayTotalSeconds % 3600) / 60
+        Text(
+            text = String.format("CTDAD %02d:%02d", cHrs, cMin),
+            fontSize = 14.sp,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.align(Alignment.CenterHorizontally)
+        )
         Spacer(modifier = Modifier.height(16.dp))
         // Current task info
         if (isTransitioning && nextTask != null) {
@@ -121,12 +133,14 @@ fun DoScreen(
                     modifier = Modifier.align(Alignment.CenterHorizontally)
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = formatTimerDuration(nextTaskValue?.durationSeconds ?: 0),
-                    fontSize = 17.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.align(Alignment.CenterHorizontally)
-                )
+                if (!timersDisabled) {
+                    Text(
+                        text = formatTimerDuration(nextTaskValue?.durationSeconds ?: 0),
+                        fontSize = 17.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
+                }
             }
         } else currentTask?.let { task ->
             Column(
@@ -150,12 +164,14 @@ fun DoScreen(
                     modifier = Modifier.align(Alignment.CenterHorizontally)
                 )
                 Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = formatTimerDuration(task.durationSeconds),
-                    fontSize = 17.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.align(Alignment.CenterHorizontally)
-                )
+                if (!timersDisabled) {
+                    Text(
+                        text = formatTimerDuration(task.durationSeconds),
+                        fontSize = 17.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
+                }
             }
         }
         Spacer(modifier = Modifier.height(32.dp))
@@ -207,37 +223,39 @@ fun DoScreen(
                 return
             } else {
                 // Show normal timer
-                val minutes = (timeRemaining / 1000) / 60
-                val seconds = (timeRemaining / 1000) % 60
-                val timeText = String.format("%02d:%02d", minutes, seconds)
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(
-                    text = timeText,
-                    fontSize = 64.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.align(Alignment.CenterHorizontally)
-                )
-                Spacer(modifier = Modifier.height(24.dp))
-                // Modern play/pause button (larger)
-                Box(
-                    modifier = Modifier
-                        .size(112.dp)
-                        .clip(CircleShape)
-                        .background(brush = com.example.dowithtime.ui.theme.TimerGradient)
-                        .clickable {
-                            if (isRunning) viewModel.pauseTimer() else viewModel.startCurrentTask()
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        painter = painterResource(id = if (isRunning) R.drawable.ic_pause else R.drawable.ic_play),
-                        contentDescription = if (isRunning) "Pause" else "Play",
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(64.dp)
+                if (!timersDisabled) {
+                    val minutes = (timeRemaining / 1000) / 60
+                    val seconds = (timeRemaining / 1000) % 60
+                    val timeText = String.format("%02d:%02d", minutes, seconds)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = timeText,
+                        fontSize = 64.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
                     )
+                    Spacer(modifier = Modifier.height(24.dp))
+                    // Modern play/pause button (larger)
+                    Box(
+                        modifier = Modifier
+                            .size(112.dp)
+                            .clip(CircleShape)
+                            .background(brush = com.example.dowithtime.ui.theme.TimerGradient)
+                            .clickable {
+                                if (isRunning) viewModel.pauseTimer() else viewModel.startCurrentTask()
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            painter = painterResource(id = if (isRunning) R.drawable.ic_pause else R.drawable.ic_play),
+                            contentDescription = if (isRunning) "Pause" else "Play",
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(64.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(24.dp))
                 }
-                Spacer(modifier = Modifier.height(24.dp))
                 // Modern Next Task button
                 Button(
                     onClick = { viewModel.nextTask() },

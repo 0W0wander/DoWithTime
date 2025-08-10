@@ -27,8 +27,8 @@ class TaskRepository(private val taskDao: TaskDao) {
         // This will be handled by the ViewModel
     }
     
-    suspend fun insertTask(task: Task) {
-        taskDao.insertTask(task)
+    suspend fun insertTask(task: Task): Int {
+        return taskDao.insertTask(task).toInt()
     }
     
     suspend fun updateTask(task: Task) {
@@ -95,4 +95,17 @@ class TaskRepository(private val taskDao: TaskDao) {
     fun getSummaryByDate(date: String): Flow<DailySummary?> = taskDao.getSummaryByDate(date)
     suspend fun ensureDailySummary(date: String) = taskDao.ensureDailySummary(date)
     suspend fun addToDailyTotal(date: String, seconds: Int) = taskDao.addToDailyTotal(date, seconds)
+
+    // Subtasks
+    fun getSubtasksForTask(taskId: Int): Flow<List<Subtask>> = taskDao.getSubtasksForTask(taskId)
+    suspend fun insertSubtask(subtask: Subtask) = taskDao.insertSubtask(subtask)
+    suspend fun updateSubtask(subtask: Subtask) = taskDao.updateSubtask(subtask)
+    suspend fun updateSubtaskOrder(subtaskId: Int, newOrder: Int) = taskDao.updateSubtaskOrder(subtaskId, newOrder)
+    suspend fun deleteSubtask(subtaskId: Int) = taskDao.deleteSubtask(subtaskId)
+    suspend fun deleteSubtasksForTask(taskId: Int) = taskDao.deleteSubtasksForTask(taskId)
+
+    // Completed logs
+    suspend fun insertCompletedLog(log: CompletedLog) = taskDao.insertCompletedLog(log)
+    suspend fun countCompletedOnDate(date: String): Int = taskDao.countCompletedOnDate(date)
+    fun getCompletedLogsByDate(date: String): Flow<List<CompletedLog>> = taskDao.getCompletedLogsByDate(date)
 } 

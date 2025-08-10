@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -54,6 +55,11 @@ import com.example.dowithtime.viewmodel.TaskViewModel
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import com.example.dowithtime.ui.theme.*
@@ -66,6 +72,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.window.DialogProperties
 
 
 // Move formatDuration function outside the main composable
@@ -90,7 +97,9 @@ fun TaskItem(
     onComplete: () -> Unit,
     onEdit: () -> Unit,
     onToggleDaily: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    showDuration: Boolean = true,
+    displayedDurationSeconds: Int? = null
 ) {
     // Determine if this is a completed daily task
     val isCompletedDaily = task.isDaily && task.completedToday
@@ -144,23 +153,25 @@ fun TaskItem(
                         )
                     }
                 }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "⏱",
-                        fontSize = 12.sp,
-                        color = if (isCompletedDaily) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary
-                    )
-                    Spacer(modifier = Modifier.width(2.dp))
-                    Text(
-                        text = formatDuration(task.durationSeconds),
-                        fontSize = 13.sp,
-                        color = if (isCompletedDaily) MaterialTheme.colorScheme.onSurfaceVariant.copy(
-                            alpha = 0.7f
-                        ) else MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = FontWeight.Medium
-                    )
+                if (showDuration) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "⏱",
+                            fontSize = 12.sp,
+                            color = if (isCompletedDaily) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(2.dp))
+                        Text(
+                            text = formatDuration(displayedDurationSeconds ?: task.durationSeconds),
+                            fontSize = 13.sp,
+                            color = if (isCompletedDaily) MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                                alpha = 0.7f
+                            ) else MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
                 }
             }
             // Complete button
@@ -237,10 +248,11 @@ fun TaskItem(
 @Composable
 fun AddTaskDialog(
     onDismiss: () -> Unit,
-    onAddTask: (String, Int, Boolean) -> Unit,
+    onAddTask: (String, Int, Boolean, List<Pair<String, Int>>) -> Unit,
     isDaily: Boolean = false,
     addToTop: Boolean,
-    onAddToTopChange: (Boolean) -> Unit
+    onAddToTopChange: (Boolean) -> Unit,
+    timersDisabled: Boolean
 ) {
     var title by remember { mutableStateOf("") }
     var minutes by remember { mutableStateOf("") }
@@ -252,6 +264,8 @@ fun AddTaskDialog(
     val titleFocusRequester = remember { FocusRequester() }
     val minutesFocusRequester = remember { FocusRequester() }
     val secondsFocusRequester = remember { FocusRequester() }
+
+    val focusManager = LocalFocusManager.current
 
     // Auto-focus title field when dialog opens
     LaunchedEffect(Unit) {
@@ -268,9 +282,20 @@ fun AddTaskDialog(
         titleFocusRequester.requestFocus()
     }
 
+    // Subtasks editor state for Add dialog (not yet persisted until confirm)
+    val newSubtasks = remember { mutableStateListOf<Pair<String, Int>>() }
+    var newSubtaskTitle by remember { mutableStateOf("") }
+    var newSubtaskMinutes by remember { mutableStateOf("") }
+    var newSubtaskSeconds by remember { mutableStateOf("") }
+    var advancedExpanded by remember { mutableStateOf(false) }
+    var showSubtaskEditor by remember { mutableStateOf(false) }
+    // We don't have direct access to viewModel here; rely on duration validation logic below being bypassed when totalSeconds==0 allowed.
     AlertDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier.shadow(16.dp, RoundedCornerShape(20.dp)),
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+        modifier = Modifier
+            .shadow(16.dp, RoundedCornerShape(20.dp))
+            .then(if (showSubtaskEditor) Modifier.fillMaxWidth().fillMaxHeight(0.9f) else Modifier),
         containerColor = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(20.dp),
         title = {
@@ -282,9 +307,11 @@ fun AddTaskDialog(
             )
         },
         text = {
-            Column(
-                modifier = Modifier.padding(vertical = 8.dp)
-            ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 8.dp)
+                    ) {
                 // Task title field
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -304,7 +331,8 @@ fun AddTaskDialog(
                         isError = titleError,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .focusRequester(titleFocusRequester),
+                            .focusRequester(titleFocusRequester)
+                             .focusProperties { next = minutesFocusRequester },
                         singleLine = true,
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = MaterialTheme.colorScheme.primary,
@@ -315,7 +343,40 @@ fun AddTaskDialog(
                             imeAction = ImeAction.Next
                         ),
                         keyboardActions = KeyboardActions(
-                            onNext = { minutesFocusRequester.requestFocus() }
+                            onNext = {
+                                val durationVisible = !timersDisabled && newSubtasks.isEmpty()
+                                if (durationVisible) {
+                                    minutesFocusRequester.requestFocus()
+                                } else if (timersDisabled) {
+                                    if (title.isBlank()) {
+                                        titleError = true
+                                    } else {
+                                        onAddTask(title, 0, isDaily, newSubtasks.toList())
+                                        clearForm()
+                                        newSubtaskTitle = ""
+                                        newSubtaskMinutes = ""
+                                        newSubtaskSeconds = ""
+                                        newSubtasks.clear()
+                                    }
+                                }
+                            },
+                            onDone = {
+                                val durationVisible = !timersDisabled && newSubtasks.isEmpty()
+                                if (durationVisible) {
+                                    minutesFocusRequester.requestFocus()
+                                } else if (timersDisabled) {
+                                    if (title.isBlank()) {
+                                        titleError = true
+                                    } else {
+                                        onAddTask(title, 0, isDaily, newSubtasks.toList())
+                                        clearForm()
+                                        newSubtaskTitle = ""
+                                        newSubtaskMinutes = ""
+                                        newSubtaskSeconds = ""
+                                        newSubtasks.clear()
+                                    }
+                                }
+                            }
                         )
                     )
                 }
@@ -343,109 +404,278 @@ fun AddTaskDialog(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // Duration section
-                Text(
+                // Duration section (hidden when timerless or when building with subtasks)
+                if (!timersDisabled && newSubtasks.isEmpty()) {
+                    Text(
                     text = "Duration",
                     fontSize = 18.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface
-                )
+                    )
 
-                Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    // Minutes field
-                    Card(
-                        modifier = Modifier.weight(1f),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        OutlinedTextField(
-                            value = minutes,
-                            onValueChange = {
-                                minutes = it.filter { char -> char.isDigit() }
-                                durationError = false
-                            },
-                            label = { Text("Minutes") },
-                            isError = durationError,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .focusRequester(minutesFocusRequester),
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Number,
-                                imeAction = ImeAction.Next
+                        // Minutes field
+                        Card(
+                            modifier = Modifier.weight(1f),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
                             ),
-                            keyboardActions = KeyboardActions(
-                                onNext = { secondsFocusRequester.requestFocus() }
-                            ),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                unfocusedBorderColor = Color.Transparent,
-                                focusedLabelColor = MaterialTheme.colorScheme.primary
+                            shape = RoundedCornerShape(12.dp),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = minutes,
+                                onValueChange = {
+                                    minutes = it.filter { char -> char.isDigit() }
+                                    durationError = false
+                                },
+                                label = { Text("Minutes") },
+                                isError = durationError,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                     .focusRequester(minutesFocusRequester)
+                                     .focusProperties {
+                                         previous = titleFocusRequester
+                                         next = secondsFocusRequester
+                                     }
+                                      ,
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Number,
+                                    imeAction = ImeAction.Next
+                                ),
+                                keyboardActions = KeyboardActions(
+                                    onNext = { secondsFocusRequester.requestFocus() }
+                                ),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = Color.Transparent,
+                                    focusedLabelColor = MaterialTheme.colorScheme.primary
+                                )
                             )
-                        )
+                        }
+
+                        // Seconds field
+                        Card(
+                            modifier = Modifier.weight(1f),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                            ),
+                            shape = RoundedCornerShape(12.dp),
+                            elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = seconds,
+                                onValueChange = {
+                                    seconds = it.filter { char -> char.isDigit() }
+                                    durationError = false
+                                },
+                                label = { Text("Seconds") },
+                                isError = durationError,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .focusRequester(secondsFocusRequester)
+                                    .focusProperties { previous = minutesFocusRequester }
+                                     ,
+                                singleLine = true,
+                                keyboardOptions = KeyboardOptions(
+                                    keyboardType = KeyboardType.Number,
+                                    imeAction = ImeAction.Done
+                                ),
+                                keyboardActions = KeyboardActions(
+                                    onDone = {
+                                        // Validate and add task
+                                        if (title.isBlank()) {
+                                            titleError = true
+                                            titleFocusRequester.requestFocus()
+                                            return@KeyboardActions
+                                        }
+
+                                        val minutesInt = minutes.toIntOrNull() ?: 0
+                                        val secondsInt = seconds.toIntOrNull() ?: 0
+                                        val totalSeconds = minutesInt * 60 + secondsInt
+
+                                         // Require at least one non-zero when timers are enabled and no subtasks
+                                         if (!timersDisabled && newSubtasks.isEmpty() && totalSeconds <= 0) {
+                                            durationError = true
+                                            minutesFocusRequester.requestFocus()
+                                            return@KeyboardActions
+                                        }
+
+                                        onAddTask(title, if (timersDisabled || newSubtasks.isNotEmpty()) 0 else totalSeconds, isDaily, newSubtasks.toList())
+                                        clearForm()
+                                        newSubtaskTitle = ""
+                                        newSubtaskMinutes = ""
+                                        newSubtaskSeconds = ""
+                                        newSubtasks.clear()
+                                    }
+                                ),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    unfocusedBorderColor = Color.Transparent,
+                                    focusedLabelColor = MaterialTheme.colorScheme.primary
+                                )
+                            )
+                        }
                     }
+                }
 
-                    // Seconds field
-                    Card(
-                        modifier = Modifier.weight(1f),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-                    ) {
-                        OutlinedTextField(
-                            value = seconds,
-                            onValueChange = {
-                                seconds = it.filter { char -> char.isDigit() }
-                                durationError = false
-                            },
-                            label = { Text("Seconds") },
-                            isError = durationError,
+                Spacer(modifier = Modifier.height(20.dp))
+                // Advanced options expander
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = if (showSubtaskEditor) 420.dp else 0.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                    ),
+                    shape = RoundedCornerShape(12.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .focusRequester(secondsFocusRequester),
-                            singleLine = true,
-                            keyboardOptions = KeyboardOptions(
-                                keyboardType = KeyboardType.Number,
-                                imeAction = ImeAction.Done
-                            ),
-                            keyboardActions = KeyboardActions(
-                                onDone = {
-                                    // Validate and add task
-                                    if (title.isBlank()) {
-                                        titleError = true
-                                        titleFocusRequester.requestFocus()
-                                        return@KeyboardActions
-                                    }
-
-                                    val minutesInt = minutes.toIntOrNull() ?: 0
-                                    val secondsInt = seconds.toIntOrNull() ?: 0
-                                    val totalSeconds = minutesInt * 60 + secondsInt
-
-                                    if (totalSeconds <= 0) {
-                                        durationError = true
-                                        minutesFocusRequester.requestFocus()
-                                        return@KeyboardActions
-                                    }
-
-                                    onAddTask(title, totalSeconds, isDaily)
-                                    clearForm()
-                                }
-                            ),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                unfocusedBorderColor = Color.Transparent,
-                                focusedLabelColor = MaterialTheme.colorScheme.primary
+                                .clickable { advancedExpanded = !advancedExpanded }
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Advanced options",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.weight(1f)
                             )
-                        )
+                            Icon(
+                                imageVector = if (advancedExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                                contentDescription = null
+                            )
+                        }
+                        if (advancedExpanded) {
+                            Divider()
+                            if (!showSubtaskEditor) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Button(onClick = { showSubtaskEditor = true }) {
+                                        Text("Add Subtasks")
+                                    }
+                                }
+                            } else {
+                                // Subtasks editor takes majority of dialog space
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(12.dp)
+                                ) {
+                                    Text(
+                                        "Subtasks",
+                                        fontSize = 18.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    // Existing subtasks list (taller when editing)
+                                    LazyColumn(
+                                        modifier = Modifier.heightIn(max = 360.dp),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        itemsIndexed(newSubtasks) { index, pair ->
+                                            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                                Text("${index + 1}.", modifier = Modifier.width(24.dp))
+                                                Column(modifier = Modifier
+                                                    .weight(1f)
+                                                    .clickable {
+                                                        // Load into editor fields for quick edit
+                                                        newSubtaskTitle = pair.first
+                                                        val m = pair.second / 60
+                                                        val s = pair.second % 60
+                                                        newSubtaskMinutes = if (m == 0) "" else m.toString()
+                                                        newSubtaskSeconds = if (s == 0) "" else s.toString()
+                                                    }) {
+                                                    Text(pair.first, fontWeight = FontWeight.Medium)
+                                                    Text(
+                                                        formatDuration(pair.second),
+                                                        fontSize = 12.sp,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                                IconButton(onClick = {
+                                                    if (index > 0) {
+                                                        val item = newSubtasks.removeAt(index)
+                                                        newSubtasks.add(index - 1, item)
+                                                    }
+                                                }) { Icon(Icons.Default.KeyboardArrowUp, contentDescription = null) }
+                                                IconButton(onClick = {
+                                                    if (index < newSubtasks.size - 1) {
+                                                        val item = newSubtasks.removeAt(index)
+                                                        newSubtasks.add(index + 1, item)
+                                                    }
+                                                }) { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) }
+                                                IconButton(onClick = { newSubtasks.removeAt(index) }) {
+                                                    Icon(Icons.Default.Delete, contentDescription = "Delete subtask")
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Spacer(Modifier.height(12.dp))
+                                    // Subtask entry fields: title on its own line, then duration fields
+                                    OutlinedTextField(
+                                        value = newSubtaskTitle,
+                                        onValueChange = { newSubtaskTitle = it },
+                                        label = { Text("Subtask title") },
+                                        singleLine = true,
+                                        modifier = Modifier.fillMaxWidth()
+                                    )
+                                    Spacer(Modifier.height(8.dp))
+                                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                                        OutlinedTextField(
+                                            value = newSubtaskMinutes,
+                                            onValueChange = { newSubtaskMinutes = it.filter { c -> c.isDigit() } },
+                                            label = { Text("Minutes") },
+                                            singleLine = true,
+                                            modifier = Modifier.width(100.dp)
+                                        )
+                                        OutlinedTextField(
+                                            value = newSubtaskSeconds,
+                                            onValueChange = { newSubtaskSeconds = it.filter { c -> c.isDigit() } },
+                                            label = { Text("Seconds") },
+                                            singleLine = true,
+                                            modifier = Modifier.width(100.dp)
+                                        )
+                                        Button(onClick = {
+                                            val m = newSubtaskMinutes.toIntOrNull() ?: 0
+                                            val s = newSubtaskSeconds.toIntOrNull() ?: 0
+                                            val total = if (timersDisabled) 0 else m * 60 + s
+                                            if (newSubtaskTitle.isNotBlank() && (timersDisabled || total > 0)) {
+                                                // If this title exists, update it; otherwise add new
+                                                val existingIndex = newSubtasks.indexOfFirst { it.first == newSubtaskTitle }
+                                                if (existingIndex >= 0) newSubtasks[existingIndex] = newSubtaskTitle to total
+                                                else newSubtasks.add(newSubtaskTitle to total)
+                                                newSubtaskTitle = ""
+                                                newSubtaskMinutes = ""
+                                                newSubtaskSeconds = ""
+                                            }
+                                        }) { Text("Add") }
+                                    }
+                                    Spacer(Modifier.height(16.dp))
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.End
+                                    ) {
+                                        TextButton(onClick = { showSubtaskEditor = false }) { Text("Done") }
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -472,25 +702,35 @@ fun AddTaskDialog(
         },
         confirmButton = {
             Button(
+                enabled = run {
+                    val minutesInt = minutes.toIntOrNull() ?: 0
+                    val secondsInt = seconds.toIntOrNull() ?: 0
+                    // If timers are enabled and no subtasks, require BOTH minutes and seconds > 0
+                    !( !timersDisabled && newSubtasks.isEmpty() && (minutesInt <= 0 || secondsInt <= 0) )
+                },
                 onClick = {
                     if (title.isBlank()) {
                         titleError = true
-                        titleFocusRequester.requestFocus()
+                                 titleFocusRequester.requestFocus()
                         return@Button
                     }
 
                     val minutesInt = minutes.toIntOrNull() ?: 0
                     val secondsInt = seconds.toIntOrNull() ?: 0
                     val totalSeconds = minutesInt * 60 + secondsInt
-
-                    if (totalSeconds <= 0) {
+                    // Enforce BOTH minutes and seconds > 0 when timers are enabled and no subtasks
+                    if (!timersDisabled && newSubtasks.isEmpty() && (minutesInt <= 0 || secondsInt <= 0)) {
                         durationError = true
-                        minutesFocusRequester.requestFocus()
+                                 minutesFocusRequester.requestFocus()
                         return@Button
                     }
-
-                    onAddTask(title, totalSeconds, isDaily)
+                    onAddTask(title, if (timersDisabled || newSubtasks.isNotEmpty()) 0 else totalSeconds, isDaily, newSubtasks.toList())
                     clearForm()
+                    newSubtaskTitle = ""
+                    newSubtaskMinutes = ""
+                    newSubtaskSeconds = ""
+                    newSubtasks.clear()
+                    // Keep dialog open for faster entry, as before
                 },
                 modifier = Modifier
                     .background(
@@ -532,7 +772,8 @@ fun EditTaskDialog(
     task: Task,
     currentPosition: Int,
     onDismiss: () -> Unit,
-    onEditTask: (String, Int, Boolean, Int) -> Unit
+    onEditTask: (String, Int, Boolean, Int) -> Unit,
+    viewModel: TaskViewModel
 ) {
     var title by remember { mutableStateOf(task.title) }
     var minutes by remember { mutableStateOf((task.durationSeconds / 60).toString()) }
@@ -553,9 +794,19 @@ fun EditTaskDialog(
         titleFocusRequester.requestFocus()
     }
 
+    val timersDisabled by viewModel.disableTimers.collectAsState()
+    val subtasks by viewModel.getSubtasksFlow(task.id).collectAsState(initial = emptyList())
+    var newSubtaskTitle by remember { mutableStateOf("") }
+    var newSubtaskMinutes by remember { mutableStateOf("") }
+    var newSubtaskSeconds by remember { mutableStateOf("") }
+
     AlertDialog(
         onDismissRequest = onDismiss,
-        modifier = Modifier.shadow(16.dp, RoundedCornerShape(20.dp)),
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+        modifier = Modifier
+            .shadow(16.dp, RoundedCornerShape(20.dp))
+            .fillMaxWidth()
+            .fillMaxHeight(0.9f),
         containerColor = MaterialTheme.colorScheme.surface,
         shape = RoundedCornerShape(20.dp),
         title = {
@@ -607,19 +858,20 @@ fun EditTaskDialog(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // Duration section
-                Text(
-                    text = "Duration",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
+                // Duration section (hide when timerless or subtasks exist)
+                if (!timersDisabled && subtasks.isEmpty()) {
+                    Text(
+                        text = "Duration",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
 
-                Spacer(modifier = Modifier.height(12.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
                     // Minutes field
                     Card(
                         modifier = Modifier.weight(1f),
@@ -692,6 +944,102 @@ fun EditTaskDialog(
                         )
                     }
                 }
+                }
+
+                Spacer(modifier = Modifier.height(20.dp))
+
+                // Advanced options: Subtasks editor
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 420.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)),
+                    shape = RoundedCornerShape(12.dp),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                ) {
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Subtasks",
+                                fontSize = 16.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        Divider()
+                        LazyColumn(modifier = Modifier.heightIn(max = 360.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            itemsIndexed(subtasks, key = { _, st -> st.id }) { index, st ->
+                                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                                    Text("${index + 1}.", modifier = Modifier.width(24.dp))
+                                    Column(
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .clickable {
+                                                newSubtaskTitle = st.title
+                                                val m = st.durationSeconds / 60
+                                                val s = st.durationSeconds % 60
+                                                newSubtaskMinutes = if (m == 0) "" else m.toString()
+                                                newSubtaskSeconds = if (s == 0) "" else s.toString()
+                                            }
+                                    ) {
+                                        Text(st.title, fontWeight = FontWeight.Medium)
+                                        Text(formatDuration(st.durationSeconds), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    IconButton(onClick = {
+                                        if (index > 0) {
+                                            val reordered = subtasks.toMutableList().apply {
+                                                removeAt(index)
+                                                add(index - 1, st)
+                                            }
+                                            viewModel.reorderSubtasks(task.id, reordered)
+                                        }
+                                    }) { Icon(Icons.Default.KeyboardArrowUp, contentDescription = null) }
+                                    IconButton(onClick = {
+                                        if (index < subtasks.size - 1) {
+                                            val reordered = subtasks.toMutableList().apply {
+                                                removeAt(index)
+                                                add(index + 1, st)
+                                            }
+                                            viewModel.reorderSubtasks(task.id, reordered)
+                                        }
+                                    }) { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) }
+                                    IconButton(onClick = { viewModel.deleteSubtask(st.id) }) {
+                                        Icon(Icons.Default.Delete, contentDescription = "Delete subtask")
+                                    }
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedTextField(value = newSubtaskTitle, onValueChange = { newSubtaskTitle = it }, label = { Text("Subtask title") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                        Spacer(Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            OutlinedTextField(value = newSubtaskMinutes, onValueChange = { newSubtaskMinutes = it.filter { c -> c.isDigit() } }, label = { Text("Minutes") }, singleLine = true, modifier = Modifier.width(100.dp))
+                            OutlinedTextField(value = newSubtaskSeconds, onValueChange = { newSubtaskSeconds = it.filter { c -> c.isDigit() } }, label = { Text("Seconds") }, singleLine = true, modifier = Modifier.width(100.dp))
+                            Button(onClick = {
+                                val m = newSubtaskMinutes.toIntOrNull() ?: 0
+                                val s = newSubtaskSeconds.toIntOrNull() ?: 0
+                                val total = if (timersDisabled) 0 else m * 60 + s
+                                if (newSubtaskTitle.isNotBlank() && (timersDisabled || total > 0)) {
+                                    val existing = subtasks.firstOrNull { it.title == newSubtaskTitle }
+                                    if (existing != null) {
+                                        viewModel.updateSubtask(existing.copy(title = newSubtaskTitle, durationSeconds = total))
+                                    } else {
+                                        viewModel.addSubtask(task.id, newSubtaskTitle, total)
+                                    }
+                                    newSubtaskTitle = ""
+                                    newSubtaskMinutes = ""
+                                    newSubtaskSeconds = ""
+                                }
+                            }) { Text("Add") }
+                        }
+                    }
+                }
 
                 Spacer(modifier = Modifier.height(20.dp))
 
@@ -740,9 +1088,11 @@ fun EditTaskDialog(
 
                                 val minutesInt = minutes.toIntOrNull() ?: 0
                                 val secondsInt = seconds.toIntOrNull() ?: 0
-                                val totalSeconds = minutesInt * 60 + secondsInt
+                                val rawTotalSeconds = minutesInt * 60 + secondsInt
+                                val usingSubtasks = subtasks.isNotEmpty()
+                                val effectiveTotalSeconds = if (timersDisabled || usingSubtasks) 0 else rawTotalSeconds
 
-                                if (totalSeconds <= 0) {
+                                if (!timersDisabled && !usingSubtasks && effectiveTotalSeconds <= 0) {
                                     durationError = true
                                     minutesFocusRequester.requestFocus()
                                     return@KeyboardActions
@@ -755,7 +1105,7 @@ fun EditTaskDialog(
                                     return@KeyboardActions
                                 }
 
-                                onEditTask(title, totalSeconds, task.isDaily, orderInt - 1)
+                                onEditTask(title, effectiveTotalSeconds, task.isDaily, orderInt - 1)
                             }
                         ),
                         colors = OutlinedTextFieldDefaults.colors(
@@ -795,6 +1145,78 @@ fun EditTaskDialog(
                         modifier = Modifier.padding(top = 4.dp)
                     )
                 }
+
+                Spacer(modifier = Modifier.height(20.dp))
+                Divider()
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Subtasks", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurface)
+                Spacer(Modifier.height(8.dp))
+                LazyColumn(modifier = Modifier.heightIn(max = 160.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    itemsIndexed(subtasks, key = { _, st -> st.id }) { index, st ->
+                        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text("${index + 1}.", modifier = Modifier.width(24.dp))
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable {
+                                        // Load into editor fields for quick edit
+                                        newSubtaskTitle = st.title
+                                        val m = st.durationSeconds / 60
+                                        val s = st.durationSeconds % 60
+                                        newSubtaskMinutes = if (m == 0) "" else m.toString()
+                                        newSubtaskSeconds = if (s == 0) "" else s.toString()
+                                    }
+                            ) {
+                                Text(st.title, fontWeight = FontWeight.Medium)
+                                Text(formatDuration(st.durationSeconds), fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            IconButton(onClick = {
+                                if (index > 0) {
+                                    val reordered = subtasks.toMutableList().apply {
+                                        removeAt(index)
+                                        add(index - 1, st)
+                                    }
+                                    viewModel.reorderSubtasks(task.id, reordered)
+                                }
+                            }) { Icon(Icons.Default.KeyboardArrowUp, contentDescription = null) }
+                            IconButton(onClick = {
+                                if (index < subtasks.size - 1) {
+                                    val reordered = subtasks.toMutableList().apply {
+                                        removeAt(index)
+                                        add(index + 1, st)
+                                    }
+                                    viewModel.reorderSubtasks(task.id, reordered)
+                                }
+                            }) { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) }
+                            IconButton(onClick = { viewModel.deleteSubtask(st.id) }) {
+                                Icon(Icons.Default.Delete, contentDescription = "Delete subtask")
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = newSubtaskTitle, onValueChange = { newSubtaskTitle = it }, label = { Text("Subtask title") }, singleLine = true, modifier = Modifier.weight(1f))
+                    OutlinedTextField(value = newSubtaskMinutes, onValueChange = { newSubtaskMinutes = it.filter { c -> c.isDigit() } }, label = { Text("m") }, singleLine = true, modifier = Modifier.width(72.dp))
+                    OutlinedTextField(value = newSubtaskSeconds, onValueChange = { newSubtaskSeconds = it.filter { c -> c.isDigit() } }, label = { Text("s") }, singleLine = true, modifier = Modifier.width(72.dp))
+                    Button(onClick = {
+                        val m = newSubtaskMinutes.toIntOrNull() ?: 0
+                        val s = newSubtaskSeconds.toIntOrNull() ?: 0
+                        val total = if (timersDisabled) 0 else m * 60 + s
+                        if (newSubtaskTitle.isNotBlank() && (timersDisabled || total > 0)) {
+                            // If editing an existing subtask title, update that subtask
+                            val existing = subtasks.firstOrNull { it.title == newSubtaskTitle }
+                            if (existing != null) {
+                                viewModel.updateSubtask(existing.copy(title = newSubtaskTitle, durationSeconds = total))
+                            } else {
+                                viewModel.addSubtask(task.id, newSubtaskTitle, total)
+                            }
+                            newSubtaskTitle = ""
+                            newSubtaskMinutes = ""
+                            newSubtaskSeconds = ""
+                        }
+                    }) { Text("Add") }
+                }
             }
         },
         confirmButton = {
@@ -808,9 +1230,11 @@ fun EditTaskDialog(
 
                     val minutesInt = minutes.toIntOrNull() ?: 0
                     val secondsInt = seconds.toIntOrNull() ?: 0
-                    val totalSeconds = minutesInt * 60 + secondsInt
+                    val rawTotalSeconds = minutesInt * 60 + secondsInt
+                    val usingSubtasks = subtasks.isNotEmpty()
+                    val totalSeconds = if (timersDisabled || usingSubtasks) 0 else rawTotalSeconds
 
-                    if (totalSeconds <= 0) {
+                    if (!timersDisabled && !usingSubtasks && totalSeconds <= 0) {
                         durationError = true
                         minutesFocusRequester.requestFocus()
                         return@Button
@@ -1234,6 +1658,8 @@ fun TodoListScreen(
     var pasteSourceIsDaily by remember { mutableStateOf(false) }
     var showSyncDialog by remember { mutableStateOf(false) }
     var syncData by remember { mutableStateOf("") }
+    var showDayLogsDialog by remember { mutableStateOf(false) }
+    var dayLogsToShow by remember { mutableStateOf("") }
 
     // Add to top checkbox state
     var addToTop by rememberSaveable { mutableStateOf(false) }
@@ -1435,7 +1861,8 @@ fun TodoListScreen(
                                     ?: "Tasks",
                                 fontWeight = FontWeight.Bold
                             )
-                            if (showCtdadBar && !historySelected) {
+                            val timersDisabled by viewModel.disableTimers.collectAsState()
+                            if (showCtdadBar && !historySelected && !timersDisabled) {
                                 val hours = todayTotalSeconds / 3600
                                 val minutes = (todayTotalSeconds % 3600) / 60
                                 Text(String.format("%02d:%02d", hours, minutes), fontWeight = FontWeight.Bold)
@@ -1519,7 +1946,11 @@ fun TodoListScreen(
                                         Card(
                                             modifier = Modifier
                                                 .fillMaxWidth()
-                                                .padding(horizontal = 12.dp),
+                                                .padding(horizontal = 12.dp)
+                                                .clickable {
+                                                    dayLogsToShow = summary.date
+                                                    showDayLogsDialog = true
+                                                },
                                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                                             elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
                                             shape = RoundedCornerShape(8.dp)
@@ -1532,9 +1963,13 @@ fun TodoListScreen(
                                                 verticalAlignment = Alignment.CenterVertically
                                             ) {
                                                 Text(summary.date, fontWeight = FontWeight.Medium)
-                                                val h = summary.totalSeconds / 3600
-                                                val m = (summary.totalSeconds % 3600) / 60
-                                                Text(String.format("%02d:%02d", h, m), fontWeight = FontWeight.Bold)
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    val h = summary.totalSeconds / 3600
+                                                    val m = (summary.totalSeconds % 3600) / 60
+                                                    Text(String.format("%02d:%02d", h, m), fontWeight = FontWeight.Bold)
+                                                    Spacer(Modifier.width(12.dp))
+                                                    Text("tap for details", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                }
                                             }
                                         }
                                     }
@@ -1552,6 +1987,13 @@ fun TodoListScreen(
                                         items = filteredTasks,
                                         key = { _, task -> task.id }
                                     ) { index, task ->
+                                        val timersDisabled by viewModel.disableTimers.collectAsState()
+                                        val subtasks by viewModel.getSubtasksFlow(task.id).collectAsState(initial = emptyList())
+                                        val displayDuration = when {
+                                            timersDisabled -> 0
+                                            subtasks.isNotEmpty() -> subtasks.sumOf { it.durationSeconds }
+                                            else -> task.durationSeconds
+                                        }
                                         TaskItem(
                                             task = task,
                                             index = index,
@@ -1571,7 +2013,10 @@ fun TodoListScreen(
                                                 editingTaskPosition = index
                                                 showEditDialog = true
                                             },
-                                            onToggleDaily = { viewModel.toggleDailyTask(task) }
+                                            onToggleDaily = { viewModel.toggleDailyTask(task) },
+                                            modifier = Modifier,
+                                            showDuration = !timersDisabled,
+                                            displayedDurationSeconds = displayDuration
                                         )
                                     }
                                 }
@@ -1631,15 +2076,21 @@ fun TodoListScreen(
 
             // Add task dialog
             if (showAddDialog) {
+                val timersDisabled by viewModel.disableTimers.collectAsState()
                 AddTaskDialog(
                     onDismiss = { showAddDialog = false },
-                    onAddTask = { title: String, durationSeconds: Int, isDaily: Boolean ->
-                        viewModel.addTask(title, durationSeconds, isDaily, addToTop)
+                    onAddTask = { title: String, durationSeconds: Int, isDaily: Boolean, newSubtasks: List<Pair<String, Int>> ->
+                        if (newSubtasks.isEmpty()) {
+                            viewModel.addTask(title, durationSeconds, isDaily, addToTop)
+                        } else {
+                            viewModel.addTaskWithSubtasks(title, durationSeconds, isDaily, addToTop, newSubtasks)
+                        }
                         // Don't close the dialog - let it stay open for the next task
                     },
                     isDaily = dailiesSelected,
                     addToTop = addToTop,
-                    onAddToTopChange = { addToTop = it }
+                    onAddToTopChange = { addToTop = it },
+                    timersDisabled = timersDisabled
                 )
             }
 
@@ -1661,7 +2112,8 @@ fun TodoListScreen(
                         )
                         showEditDialog = false
                         editingTask = null
-                    }
+                    },
+                    viewModel = viewModel
                 )
             }
 
@@ -1750,6 +2202,14 @@ fun TodoListScreen(
                                 Spacer(Modifier.width(8.dp))
                                 Text("Use actual time spent for CTDAD")
                             }
+                            Spacer(Modifier.height(8.dp))
+                            // Disable timers (timerless mode)
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                val timersDisabled by viewModel.disableTimers.collectAsState()
+                                Checkbox(checked = timersDisabled, onCheckedChange = { viewModel.setDisableTimers(it) })
+                                Spacer(Modifier.width(8.dp))
+                                Text("Disable timers (timerless mode)")
+                            }
                             Spacer(Modifier.height(16.dp))
                             Divider()
                             Spacer(Modifier.height(16.dp))
@@ -1771,6 +2231,37 @@ fun TodoListScreen(
                         Button(onClick = { showSettingsDialog = false }) {
                             Text("Close")
                         }
+                    }
+                )
+            }
+
+            // Day logs dialog
+            if (showDayLogsDialog && dayLogsToShow.isNotEmpty()) {
+                val logs by viewModel.getCompletedLogsByDay(dayLogsToShow).collectAsState(initial = emptyList())
+                AlertDialog(
+                    onDismissRequest = { showDayLogsDialog = false },
+                    title = { Text("Completed on $dayLogsToShow") },
+                    text = {
+                        Column(modifier = Modifier.heightIn(max = 320.dp)) {
+                            if (logs.isEmpty()) {
+                                Text("No logs for this day")
+                            } else {
+                                logs.forEach { log ->
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Text(log.title)
+                                        val h = log.durationSeconds / 3600
+                                        val m = (log.durationSeconds % 3600) / 60
+                                        Text(String.format("%02d:%02d", h, m))
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    confirmButton = {
+                        Button(onClick = { showDayLogsDialog = false }) { Text("Close") }
                     }
                 )
             }

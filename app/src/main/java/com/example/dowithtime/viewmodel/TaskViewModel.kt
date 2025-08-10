@@ -8,6 +8,8 @@ import com.example.dowithtime.data.Task
 import com.example.dowithtime.data.TaskRepository
 import com.example.dowithtime.data.TaskList
 import com.example.dowithtime.data.DailySummary
+import com.example.dowithtime.data.Subtask
+import com.example.dowithtime.data.CompletedLog
 import com.example.dowithtime.service.TimerService
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -88,12 +90,29 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _dailySummaries = MutableStateFlow<List<DailySummary>>(emptyList())
     val dailySummaries: StateFlow<List<DailySummary>> = _dailySummaries.asStateFlow()
+    private val _completedCountToday = MutableStateFlow(0)
+    val completedCountToday: StateFlow<Int> = _completedCountToday.asStateFlow()
+    private val _completedLogsForDay = MutableStateFlow<List<CompletedLog>>(emptyList())
+    val completedLogsForDay: StateFlow<List<CompletedLog>> = _completedLogsForDay.asStateFlow()
+
+    // Subtasks cache for quick access
+    private val _subtasksByTaskId = MutableStateFlow<Map<Int, List<Subtask>>>(emptyMap())
+    val subtasksByTaskId: StateFlow<Map<Int, List<Subtask>>> = _subtasksByTaskId.asStateFlow()
+
+    // Current active subtask when iterating tasks with subtasks
+    private val _currentSubtask = MutableStateFlow<Subtask?>(null)
+    val currentSubtask: StateFlow<Subtask?> = _currentSubtask.asStateFlow()
+    private var currentStartedAtMs: Long? = null
+    private var lastLoggedKey: String? = null
+    private var lastLoggedAtMs: Long = 0L
 
     // Settings: show CTDAD bar and use actual time tracking
     private val _showCtdadBar = MutableStateFlow(true)
     val showCtdadBar: StateFlow<Boolean> = _showCtdadBar.asStateFlow()
     private val _useActualTimeForCtdad = MutableStateFlow(false)
     val useActualTimeForCtdad: StateFlow<Boolean> = _useActualTimeForCtdad.asStateFlow()
+    private val _disableTimers = MutableStateFlow(false)
+    val disableTimers: StateFlow<Boolean> = _disableTimers.asStateFlow()
     
     init {
         val database = AppDatabase.getDatabase(application)
@@ -127,12 +146,19 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 val todayDate = getTodayDateString()
                 val todaySummary = summaries.firstOrNull { it.date == todayDate }
                 _todayTotalSeconds.value = todaySummary?.totalSeconds ?: 0
+                _completedCountToday.value = repository.countCompletedOnDate(todayDate)
+                repository.getCompletedLogsByDate(todayDate).collect { logs ->
+                    _completedLogsForDay.value = logs
+                }
             }
         }
 
         // Load settings
         _showCtdadBar.value = prefs.getBoolean("show_ctdad_bar", true)
         _useActualTimeForCtdad.value = prefs.getBoolean("use_actual_time_ctdad", false)
+        _disableTimers.value = prefs.getBoolean("disable_timers", false)
+
+        // Removed sample seeding for CTDAD history
     }
     
     private fun loadData() {
@@ -249,9 +275,45 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         val today = getTodayDateString()
         repository.ensureDailySummary(today)
         repository.addToDailyTotal(today, seconds)
+        // Update the exposed StateFlow so UI reflects changes immediately
+        val todaySummary = repository.getSummaryByDate(today).first()
+        _todayTotalSeconds.value = (todaySummary?.totalSeconds ?: 0)
+    }
+    private fun addCtdadForCurrentSegment(task: Task) {
+        viewModelScope.launch {
+            val usingActual = _useActualTimeForCtdad.value
+            val now = System.currentTimeMillis()
+            val started = currentStartedAtMs
+            val segmentSeconds = when {
+                usingActual && started != null -> ((now - started) / 1000L).toInt().coerceAtLeast(0)
+                _currentSubtask.value != null -> _currentSubtask.value?.durationSeconds ?: 0
+                else -> task.durationSeconds
+            }
+            val segmentId = "${task.id}:${_currentSubtask.value?.id ?: -1}"
+            // De-dup guard: skip if we just logged this segment very recently
+            if (segmentId == lastLoggedKey && (now - lastLoggedAtMs) < 1500) {
+                currentStartedAtMs = null
+                return@launch
+            }
+            lastLoggedKey = segmentId
+            lastLoggedAtMs = now
+            addToTodayCtdad(if (_disableTimers.value) 0 else segmentSeconds)
+            // Log with appropriate title (subtask or task)
+            val titleToLog = _currentSubtask.value?.title ?: task.title
+            logCompletion(titleToLog, if (_disableTimers.value) 0 else segmentSeconds)
+            currentStartedAtMs = null
+        }
     }
 
     private fun computeCtdadSecondsFor(task: Task): Int {
+        if (_disableTimers.value) return 0
+        // When a task has subtasks, we account per subtask during iteration.
+        // Avoid adding the full task duration again at task completion time.
+        val hasSubtasks = runCatching { repository.getSubtasksForTask(task.id) }.getOrNull()?.let { flow ->
+            // This is a Flow; we cannot collect here synchronously. Default to true only when currentSubtask exists.
+            _currentSubtask.value != null
+        } ?: false
+        if (hasSubtasks) return 0
         return if (_useActualTimeForCtdad.value && _isInActiveSession.value) {
             val remainingSeconds = (_timeRemaining.value / 1000L).toInt()
             val spent = task.durationSeconds - remainingSeconds
@@ -270,9 +332,21 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         _useActualTimeForCtdad.value = useActual
         prefs.edit().putBoolean("use_actual_time_ctdad", useActual).apply()
     }
+
+    fun setDisableTimers(disable: Boolean) {
+        _disableTimers.value = disable
+        prefs.edit().putBoolean("disable_timers", disable).apply()
+    }
+
+    fun getCompletedLogsByDay(date: String) = repository.getCompletedLogsByDate(date)
+    suspend fun getCompletedCountForDate(date: String): Int = repository.countCompletedOnDate(date)
     
     fun addTask(title: String, durationSeconds: Int, isDaily: Boolean = false, addToTop: Boolean = false) {
         viewModelScope.launch {
+            // Guard: when timers are enabled and no subtasks path, reject zero duration
+            if (!_disableTimers.value && durationSeconds <= 0) {
+                return@launch
+            }
             // Ensure we have a valid current list ID for non-daily tasks
             val currentListId = if (isDaily) -1 else {
                 _currentListId.value ?: _taskLists.value.firstOrNull()?.id ?: 1
@@ -280,13 +354,13 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             
             val task = Task(
                 title = title,
-                durationSeconds = durationSeconds,
+                durationSeconds = if (_disableTimers.value) 0 else durationSeconds,
                 isCompleted = false,
                 order = if (isDaily) _dailyTasks.value.size else _tasks.value.size,
                 listId = currentListId,
                 isDaily = isDaily
             )
-            repository.insertTask(task)
+            val newId = repository.insertTask(task)
             
             if (isDaily) {
                 refreshDailyTasks()
@@ -299,6 +373,58 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                     val currentTasks = repository.getIncompleteTasksByList(currentListId).first()
                     val newTask = currentTasks.last() // The task we just added will be at the end
                     insertTasksAtPosition(listOf(newTask), 0) // Move it to position 0 (top)
+                }
+            }
+            uploadToCloud()
+        }
+    }
+
+    // Add task with optional subtasks (used by Add dialog)
+    fun addTaskWithSubtasks(
+        title: String,
+        durationSeconds: Int,
+        isDaily: Boolean,
+        addToTop: Boolean,
+        newSubtasks: List<Pair<String, Int>>
+    ) {
+        viewModelScope.launch {
+            val currentListId = if (isDaily) -1 else {
+                _currentListId.value ?: _taskLists.value.firstOrNull()?.id ?: 1
+            }
+            val useSubtasks = newSubtasks.isNotEmpty()
+            if (!useSubtasks && !_disableTimers.value && durationSeconds <= 0) {
+                return@launch
+            }
+            val effectiveDuration = if (_disableTimers.value || useSubtasks) 0 else durationSeconds
+            val task = Task(
+                title = title,
+                durationSeconds = effectiveDuration,
+                isCompleted = false,
+                order = if (isDaily) _dailyTasks.value.size else _tasks.value.size,
+                listId = currentListId,
+                isDaily = isDaily
+            )
+            val newTaskId = repository.insertTask(task)
+            if (useSubtasks) {
+                newSubtasks.forEachIndexed { index, (stTitle, stSeconds) ->
+                    val subtask = Subtask(
+                        parentTaskId = newTaskId,
+                        title = stTitle,
+                        durationSeconds = if (_disableTimers.value) 0 else stSeconds,
+                        isCompleted = false,
+                        order = index
+                    )
+                    repository.insertSubtask(subtask)
+                }
+            }
+            if (isDaily) {
+                refreshDailyTasks()
+            } else {
+                refreshTasksForCurrentList(currentListId)
+                if (addToTop) {
+                    val currentTasks = repository.getIncompleteTasksByList(currentListId).first()
+                    val newTask = currentTasks.last()
+                    insertTasksAtPosition(listOf(newTask), 0)
                 }
             }
             uploadToCloud()
@@ -449,6 +575,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             repository.markTaskCompleted(task.id)
             val secondsToAdd = computeCtdadSecondsFor(task)
             addToTodayCtdad(secondsToAdd)
+            logCompletion(task.title, secondsToAdd)
             // Refresh tasks for the current list after marking as completed
             refreshTasksForCurrentList(_currentListId.value)
             uploadToCloud()
@@ -459,9 +586,53 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         repository.markDailyTaskCompleted(task.id)
         val secondsToAdd = computeCtdadSecondsFor(task)
         addToTodayCtdad(secondsToAdd)
+        logCompletion(task.title, secondsToAdd)
         // Refresh daily tasks to get updated completion status
         refreshDailyTasks()
         uploadToCloud()
+    }
+
+    // Skip-CTDAD variants for internal flow when we already logged the segment
+    private fun markTaskCompletedSkipCtdad(task: Task) {
+        viewModelScope.launch {
+            repository.markTaskCompleted(task.id)
+            refreshTasksForCurrentList(_currentListId.value)
+            uploadToCloud()
+        }
+    }
+    private fun markDailyTaskCompletedSkipCtdad(task: Task) {
+        viewModelScope.launch {
+            repository.markDailyTaskCompleted(task.id)
+            refreshDailyTasks()
+            uploadToCloud()
+        }
+    }
+
+    private suspend fun logCompletion(title: String, seconds: Int) {
+        val today = getTodayDateString()
+        repository.insertCompletedLog(CompletedLog(date = today, title = title, durationSeconds = seconds))
+        _completedCountToday.value = repository.countCompletedOnDate(today)
+    }
+
+    // Subtasks API
+    fun getSubtasksFlow(taskId: Int) = repository.getSubtasksForTask(taskId)
+    fun addSubtask(parentTaskId: Int, title: String, durationSeconds: Int) {
+        viewModelScope.launch {
+            val current = repository.getSubtasksForTask(parentTaskId).first()
+            val subtask = Subtask(parentTaskId = parentTaskId, title = title, durationSeconds = durationSeconds, order = current.size)
+            repository.insertSubtask(subtask)
+        }
+    }
+    fun updateSubtask(subtask: Subtask) {
+        viewModelScope.launch { repository.updateSubtask(subtask) }
+    }
+    fun deleteSubtask(subtaskId: Int) {
+        viewModelScope.launch { repository.deleteSubtask(subtaskId) }
+    }
+    fun reorderSubtasks(parentTaskId: Int, newOrder: List<Subtask>) {
+        viewModelScope.launch {
+            newOrder.forEachIndexed { index, st -> repository.updateSubtaskOrder(st.id, index) }
+        }
     }
     
     fun resetDailyTaskCompletion() {
@@ -652,56 +823,10 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         nextTaskReceiver = object : android.content.BroadcastReceiver() {
             override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
                 println("DEBUG: Broadcast received: ${intent?.action}")
-                        when (intent?.action) {
+                when (intent?.action) {
                     "com.example.dowithtime.NEXT_TASK" -> {
-                        viewModelScope.launch {
-                            // When timer expires, mark current task as completed and trigger transition
-                            _currentTask.value?.let { currentTask ->
-                                val wasShowingAlarm = _showAlarm.value
-                                println("DEBUG: NEXT_TASK broadcast received, wasShowingAlarm: $wasShowingAlarm")
-                                
-                                        if (currentTask.isDaily) {
-                                            // For daily tasks, mark as completed for today but don't remove from list
-                                            markDailyTaskCompleted(currentTask)
-                                        } else {
-                                            // For regular tasks, mark as completed and remove from list
-                                            println("DEBUG: Marking task ${currentTask.id} (${currentTask.title}) as completed")
-                                            markTaskCompleted(currentTask)
-                                        }
-                                
-                                // Check if we were showing an alarm (timer just finished)
-                                // If so, move directly to next task instead of starting transition
-                                if (wasShowingAlarm) {
-                                    println("DEBUG: Was showing alarm, moving directly to next task")
-                                    moveToNextTask()
-                                } else {
-                                    println("DEBUG: Was not showing alarm, checking if there's a next task")
-                                    // Check if there's a next task before starting transition
-                                    val nextTask = getNextTask()
-                                    if (nextTask != null) {
-                                        println("DEBUG: Next task exists, starting transition")
-                                        // Start the transition period
-                                        timerService?.let { service ->
-                                            val intent = android.content.Intent(getApplication(), TimerService::class.java).apply {
-                                                action = TimerService.ACTION_NEXT_TASK
-                                            }
-                                            getApplication<Application>().startService(intent)
-                                        }
-                                    } else {
-                                        println("DEBUG: No next task, immediately finishing session")
-                                        // No next task, immediately finish the session
-                                        stopTimer()
-                                        if (_isInActiveSession.value) {
-                                            _isInActiveSession.value = false
-                                            // Clear active session state from SharedPreferences
-                                            prefs.edit().putBoolean("was_in_active_session", false).apply()
-                                            _onAllTasksCompleted?.invoke()
-                                        }
-                                    }
-                                }
-                                        uploadToCloud()
-                            }
-                        }
+                        // Delegate to unified nextTask() which handles subtasks and completion
+                        nextTask()
                     }
                     "com.example.dowithtime.NEXT_TASK_DIRECT" -> {
                         println("DEBUG: NEXT_TASK_DIRECT broadcast received, calling nextTask() directly")
@@ -729,10 +854,30 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 _isInActiveSession.value = true
                 // Save active session state to SharedPreferences
                 prefs.edit().putBoolean("was_in_active_session", true).apply()
-                // Immediately set the time remaining to the current task's duration
-                _timeRemaining.value = task.durationSeconds * 1000L
-                // Always reset the timer to the current task's duration
-                timerService?.startTask(task)
+                // If task has subtasks, start with the first subtask's duration
+                val subtasks = repository.getSubtasksForTask(task.id).first()
+                val firstSubtask = subtasks.firstOrNull()
+                if (firstSubtask != null) {
+                    _currentSubtask.value = firstSubtask
+                    _timeRemaining.value = firstSubtask.durationSeconds * 1000L
+                    currentStartedAtMs = System.currentTimeMillis()
+                    if (!_disableTimers.value) {
+                        // Start timer using subtask duration and title context
+                        timerService?.startTask(
+                            task.copy(
+                                title = firstSubtask.title,
+                                durationSeconds = firstSubtask.durationSeconds
+                            )
+                        )
+                    }
+                } else {
+                    // No subtasks, use the task's duration
+                    _timeRemaining.value = task.durationSeconds * 1000L
+                    currentStartedAtMs = System.currentTimeMillis()
+                    if (!_disableTimers.value) {
+                        timerService?.startTask(task)
+                    }
+                }
             }
         }
     }
@@ -760,29 +905,89 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     }
     
     fun resetTimer() {
-        _currentTask.value?.let { task ->
-            // Immediately set the time remaining to the current task's duration
-            _timeRemaining.value = task.durationSeconds * 1000L
-            // Update the TimerService with the current task and its duration
-            timerService?.updateTask(task)
+        val task = _currentTask.value ?: return
+        val subtask = _currentSubtask.value
+        val durationSeconds = subtask?.durationSeconds ?: task.durationSeconds
+        // Immediately set the time remaining to the current (sub)task's duration
+        _timeRemaining.value = durationSeconds * 1000L
+        if (!_disableTimers.value) {
+            // Update the TimerService with the current (sub)task's duration
+            val taskForTimer = if (subtask != null) {
+                task.copy(title = subtask.title, durationSeconds = subtask.durationSeconds)
+            } else task
+            timerService?.updateTask(taskForTimer)
         }
-        timerService?.let { service ->
-            val intent = android.content.Intent(getApplication(), TimerService::class.java).apply {
-                action = TimerService.ACTION_RESET
+        if (!_disableTimers.value) {
+            timerService?.let { service ->
+                val intent = android.content.Intent(getApplication(), TimerService::class.java).apply {
+                    action = TimerService.ACTION_RESET
+                }
+                getApplication<Application>().startService(intent)
             }
-            getApplication<Application>().startService(intent)
         }
     }
     
     fun nextTask() {
         _currentTask.value?.let { currentTask ->
             viewModelScope.launch {
+                // Handle subtask progression first
+                val subtasks = repository.getSubtasksForTask(currentTask.id).first()
+                val currentSub = _currentSubtask.value
+                if (subtasks.isNotEmpty()) {
+                    val currentIndex = subtasks.indexOfFirst { it.id == currentSub?.id }
+                    if (currentIndex != -1 && currentIndex < subtasks.size - 1) {
+                        // Move to next subtask within the same task
+                        val nextSubtask = subtasks[currentIndex + 1]
+                        // Log time for the subtask we just finished
+                        addCtdadForCurrentSegment(currentTask)
+                        _currentSubtask.value = nextSubtask
+                        _timeRemaining.value = nextSubtask.durationSeconds * 1000L
+                        currentStartedAtMs = System.currentTimeMillis()
+                        if (_disableTimers.value) {
+                            // In timerless mode, wait for user to press Next again
+                        } else {
+                            timerService?.startTask(
+                                currentTask.copy(
+                                    title = nextSubtask.title,
+                                    durationSeconds = nextSubtask.durationSeconds
+                                )
+                            )
+                        }
+                        return@launch
+                    } else if (currentIndex == subtasks.size - 1) {
+                        // Finished last subtask, log (only if we actually had a current subtask) and clear
+                        if (currentSub != null) {
+                            addCtdadForCurrentSegment(currentTask)
+                        }
+                        _currentSubtask.value = null
+                    } else if (currentIndex == -1) {
+                        // No current subtask set (edge case), start from first
+                        val firstSubtask = subtasks.first()
+                        _currentSubtask.value = firstSubtask
+                        _timeRemaining.value = firstSubtask.durationSeconds * 1000L
+                        currentStartedAtMs = System.currentTimeMillis()
+                        if (_disableTimers.value) {
+                            // Wait for Next press
+                        } else {
+                            timerService?.startTask(
+                                currentTask.copy(
+                                    title = firstSubtask.title,
+                                    durationSeconds = firstSubtask.durationSeconds
+                                )
+                            )
+                        }
+                        return@launch
+                    }
+                }
+                val hadSubtasks = subtasks.isNotEmpty()
                 if (currentTask.isDaily) {
-                    // For daily tasks, mark as completed for today but don't remove from list
-                    markDailyTaskCompleted(currentTask)
+                    // If there were no subtasks, log once here; otherwise, subtasks already logged
+                    if (!hadSubtasks) addCtdadForCurrentSegment(currentTask)
+                    markDailyTaskCompletedSkipCtdad(currentTask)
                 } else {
-                    // For regular tasks, mark as completed and remove from list
-                    markTaskCompleted(currentTask)
+                    // If there were no subtasks, log once here; otherwise, subtasks already logged
+                    if (!hadSubtasks) addCtdadForCurrentSegment(currentTask)
+                    markTaskCompletedSkipCtdad(currentTask)
                     // Small delay to ensure the task list is updated
                     kotlinx.coroutines.delay(100)
                 }
@@ -791,11 +996,15 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 val nextTask = getNextTask()
                 if (nextTask != null) {
                     // There's a next task, start the transition
-                    timerService?.let { service ->
-                        val intent = android.content.Intent(getApplication(), TimerService::class.java).apply {
-                            action = TimerService.ACTION_NEXT_TASK
+                    if (!_disableTimers.value) {
+                        timerService?.let { service ->
+                            val intent = android.content.Intent(getApplication(), TimerService::class.java).apply {
+                                action = TimerService.ACTION_NEXT_TASK
+                            }
+                            getApplication<Application>().startService(intent)
                         }
-                        getApplication<Application>().startService(intent)
+                    } else {
+                        moveToNextTask()
                     }
                 } else {
                     // No next task, immediately finish the session
@@ -856,9 +1065,30 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         if (nextTask != null) {
             println("DEBUG: Setting current task to: ${nextTask.title}")
             _currentTask.value = nextTask
-            _timeRemaining.value = nextTask.durationSeconds * 1000L
-            // Always use startTask to ensure proper timer initialization
-            timerService?.startTask(nextTask)
+            // If next task has subtasks, start with its first subtask
+            val subtasks = repository.getSubtasksForTask(nextTask.id).first()
+            val firstSubtask = subtasks.firstOrNull()
+            if (firstSubtask != null) {
+                _currentSubtask.value = firstSubtask
+                _timeRemaining.value = firstSubtask.durationSeconds * 1000L
+                currentStartedAtMs = System.currentTimeMillis()
+                if (!_disableTimers.value) {
+                    timerService?.startTask(
+                        nextTask.copy(
+                            title = firstSubtask.title,
+                            durationSeconds = firstSubtask.durationSeconds
+                        )
+                    )
+                }
+            } else {
+                _currentSubtask.value = null
+                _timeRemaining.value = nextTask.durationSeconds * 1000L
+                currentStartedAtMs = System.currentTimeMillis()
+                if (!_disableTimers.value) {
+                    // Use service only when timers are enabled
+                    timerService?.startTask(nextTask)
+                }
+            }
         } else {
             println("DEBUG: No next task found, stopping timer")
             stopTimer()

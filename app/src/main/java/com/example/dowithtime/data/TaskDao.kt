@@ -18,7 +18,7 @@ interface TaskDao {
     fun getAllDailyTasks(): Flow<List<Task>>
     
     @Insert
-    suspend fun insertTask(task: Task)
+    suspend fun insertTask(task: Task): Long
     
     @Update
     suspend fun updateTask(task: Task)
@@ -50,6 +50,35 @@ interface TaskDao {
 
     @Query("UPDATE daily_summaries SET total_seconds = total_seconds + :seconds WHERE date = :date")
     suspend fun addToDailyTotal(date: String, seconds: Int)
+
+    // Subtasks
+    @Query("SELECT * FROM subtasks WHERE parent_task_id = :taskId ORDER BY `order` ASC")
+    fun getSubtasksForTask(taskId: Int): Flow<List<Subtask>>
+
+    @Insert
+    suspend fun insertSubtask(subtask: Subtask)
+
+    @Update
+    suspend fun updateSubtask(subtask: Subtask)
+
+    @Query("UPDATE subtasks SET `order` = :newOrder WHERE id = :subtaskId")
+    suspend fun updateSubtaskOrder(subtaskId: Int, newOrder: Int)
+
+    @Query("DELETE FROM subtasks WHERE id = :subtaskId")
+    suspend fun deleteSubtask(subtaskId: Int)
+
+    @Query("DELETE FROM subtasks WHERE parent_task_id = :taskId")
+    suspend fun deleteSubtasksForTask(taskId: Int)
+
+    // Completed logs
+    @Insert
+    suspend fun insertCompletedLog(log: CompletedLog)
+
+    @Query("SELECT COUNT(*) FROM completed_logs WHERE date = :date")
+    suspend fun countCompletedOnDate(date: String): Int
+
+    @Query("SELECT * FROM completed_logs WHERE date = :date ORDER BY id DESC")
+    fun getCompletedLogsByDate(date: String): Flow<List<CompletedLog>>
     
     // TaskList methods
     @Query("SELECT * FROM task_lists")

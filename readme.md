@@ -8,4 +8,4 @@ This Todolist App where each task has a time duration assigned to it has the abi
 - Pasting Lists of tasks into other lists
 - Repeatable tasks
 - Changing Timer audio
-- Exporting/Importing
+- Exporting/Importingd
