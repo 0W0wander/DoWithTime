@@ -710,53 +710,54 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             val targetListTasks = repository.getIncompleteTasksByList(targetListId).first().toMutableList()
             val insertIndex = targetPosition.coerceIn(0, targetListTasks.size)
             
-            // Create new tasks with new IDs and the target list ID
-            val newTasks = tasksToInsert.map { originalTask ->
-                originalTask.copy(
-                    id = 0, // Let Room auto-generate new IDs
+            // Deep-copy with new IDs immediately and track them in order
+            val insertedNewTasks = mutableListOf<Task>()
+            tasksToInsert.forEach { originalTask ->
+                val newTask = originalTask.copy(
+                    id = 0,
                     listId = targetListId,
-                    order = 0 // Will be set properly below
+                    isDaily = false,
+                    isCompleted = false,
+                    completedToday = false,
+                    order = 0
                 )
+                val newId = repository.insertTask(newTask)
+                insertedNewTasks.add(newTask.copy(id = newId))
+
+                // Clone subtasks for this task
+                val subtasks = repository.getSubtasksForTask(originalTask.id).first()
+                subtasks.forEachIndexed { index, st ->
+                    repository.insertSubtask(
+                        Subtask(
+                            parentTaskId = newId,
+                            title = st.title,
+                            durationSeconds = if (_disableTimers.value) 0 else st.durationSeconds,
+                            isCompleted = false,
+                            order = index
+                        )
+                    )
+                }
             }
-            
-            // Insert the new tasks into the database
-            newTasks.forEach { task ->
-                repository.insertTask(task)
-            }
-            
-            // Get the updated list of tasks from the target list
+
+            // Reorder: place the new block at requested index
             val updatedTargetListTasks = repository.getIncompleteTasksByList(targetListId).first().toMutableList()
-            
-            // Reorder all tasks to put the new tasks at the target position
-            val tasksToReorder = mutableListOf<Task>()
-            
-            // Add tasks before the insert position
-            tasksToReorder.addAll(updatedTargetListTasks.take(insertIndex))
-            
-            // Add the new tasks at the target position
-            tasksToReorder.addAll(newTasks)
-            
-            // Add tasks after the insert position (excluding the new tasks we just added)
-            val existingTasksAfterPosition = updatedTargetListTasks.drop(insertIndex).filter { existingTask ->
-                !newTasks.any { newTask -> newTask.title == existingTask.title && newTask.durationSeconds == existingTask.durationSeconds }
-            }
-            tasksToReorder.addAll(existingTasksAfterPosition)
-            
-            // Update all task orders to be sequential
-            tasksToReorder.forEachIndexed { index, task ->
-                repository.updateTaskOrder(task.id, index)
-            }
-            
-            // If the target list is the current list, refresh the current list's tasks
+            val byId = insertedNewTasks.map { it.id }.toSet()
+            val existingWithoutInserted = updatedTargetListTasks.filter { it.id !in byId }.toMutableList()
+            val safeIndex = insertIndex.coerceIn(0, existingWithoutInserted.size)
+            existingWithoutInserted.addAll(safeIndex, insertedNewTasks)
+            existingWithoutInserted.forEachIndexed { index, task -> repository.updateTaskOrder(task.id, index) }
+
             if (targetListId == _currentListId.value) {
                 refreshTasksForCurrentList(targetListId)
             }
-            
+
             uploadToCloud()
         }
     }
     
     private var nextTaskReceiver: android.content.BroadcastReceiver? = null
+    // Lock iteration to the list that was active when the session started
+    private var sessionListId: Int? = null
     
     fun setTimerService(service: TimerService) {
         timerService = service
@@ -850,6 +851,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             refreshCurrentTask()
             
             _currentTask.value?.let { task ->
+                // Lock to the current list for the whole session to avoid unintended list switches
+                sessionListId = _currentListId.value
                 // Mark that we're in an active session
                 _isInActiveSession.value = true
                 // Save active session state to SharedPreferences
@@ -900,6 +903,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         }
         // Reset session flag when manually stopping
         _isInActiveSession.value = false
+        sessionListId = null
         // Clear active session state from SharedPreferences
         prefs.edit().putBoolean("was_in_active_session", false).apply()
     }
@@ -1106,24 +1110,23 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     suspend fun getNextTask(): Task? {
         // Check if we should be working with daily tasks based on the remembered state
         val shouldWorkWithDailyTasks = _wasInDailyList.value
-        
+
         val nextTask = if (shouldWorkWithDailyTasks) {
             // For daily tasks, get the latest data directly from the database
-            // and find the first uncompleted daily task
             val latestDailyTasks = repository.getAllDailyTasks().first()
             latestDailyTasks.firstOrNull { !it.completedToday }
         } else {
-            // For regular tasks, use the current _tasks.value which should be up-to-date
-            // instead of making a fresh database query
-            val currentTasks = _tasks.value
-            
-            // Debug: Print the current tasks to see what's available
-            println("DEBUG: Current incomplete tasks from _tasks.value: ${currentTasks.map { "${it.title} (completed: ${it.isCompleted})" }}")
-            
-            // Filter out daily tasks that are completed for today
-            currentTasks.firstOrNull { task -> 
-                !task.isDaily || !task.completedToday 
-            }
+            // For regular tasks, always pull the latest tasks for the CURRENT LIST from DB
+            val listId = sessionListId
+                ?: _currentListId.value
+                ?: _taskLists.value.firstOrNull()?.id
+                ?: 1
+            val latestListTasks = repository.getIncompleteTasksByList(listId).first()
+
+            // Debug: Print the current tasks to see what's available for this list
+            println("DEBUG: Current incomplete tasks for list $listId: ${latestListTasks.map { it.title }}")
+
+            latestListTasks.firstOrNull()
         }
         
         // Debug: Print the selected next task
@@ -1175,19 +1178,102 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 val sourceId = sourceListId ?: return@launch
                 repository.getIncompleteTasksByList(sourceId).first()
             }
-            
+
             if (tasksToPaste.isNotEmpty()) {
                 val isTargetDaily = targetListId == -1 // -1 represents daily list
                 if (isTargetDaily) {
-                    insertDailyTasksAtPosition(tasksToPaste, targetPosition)
+                    // Deep-copy into Dailies (new IDs, preserve title/duration, clone subtasks)
+                    duplicateTasksIntoDailies(tasksToPaste, targetPosition)
                 } else {
-                    // For regular lists, we need to handle the list assignment properly
-                    val tasksWithNewList = tasksToPaste.map { it.copy(listId = targetListId) }
-                    insertTasksToTargetList(tasksWithNewList, targetListId, targetPosition)
+                    // Deep-copy into a regular list (new IDs, clone subtasks)
+                    duplicateTasksIntoList(tasksToPaste, targetListId, targetPosition)
                 }
                 uploadToCloud()
             }
         }
+    }
+
+    private suspend fun duplicateTasksIntoList(tasksToCopy: List<Task>, targetListId: Int, targetPosition: Int) {
+        // Insert copies and capture new IDs
+        val insertedNewTasks = mutableListOf<Task>()
+        tasksToCopy.forEach { original ->
+            val newTask = original.copy(
+                id = 0,
+                listId = targetListId,
+                isDaily = false,
+                isCompleted = false,
+                completedToday = false,
+                order = 0
+            )
+            val newId = repository.insertTask(newTask)
+            insertedNewTasks.add(newTask.copy(id = newId))
+
+            // Clone subtasks (if any)
+            val subtasks = repository.getSubtasksForTask(original.id).first()
+            subtasks.forEachIndexed { index, st ->
+                repository.insertSubtask(
+                    Subtask(
+                        parentTaskId = newId,
+                        title = st.title,
+                        durationSeconds = if (_disableTimers.value) 0 else st.durationSeconds,
+                        isCompleted = false,
+                        order = index
+                    )
+                )
+            }
+        }
+
+        // Reorder to place the block at the requested position
+        val targetTasks = repository.getIncompleteTasksByList(targetListId).first().toMutableList()
+        val safeIndex = targetPosition.coerceIn(0, targetTasks.size - insertedNewTasks.size).coerceAtLeast(0)
+        // Pull out the inserted tasks by their new IDs, then reinsert at desired index
+        val byId = insertedNewTasks.map { it.id }.toSet()
+        val existingWithoutInserted = targetTasks.filter { it.id !in byId }.toMutableList()
+        existingWithoutInserted.addAll(safeIndex, insertedNewTasks)
+        existingWithoutInserted.forEachIndexed { idx, task -> repository.updateTaskOrder(task.id, idx) }
+
+        if (targetListId == _currentListId.value) {
+            refreshTasksForCurrentList(targetListId)
+        }
+    }
+
+    private suspend fun duplicateTasksIntoDailies(tasksToCopy: List<Task>, targetPosition: Int) {
+        // Insert copies as daily tasks
+        val insertedNewTasks = mutableListOf<Task>()
+        tasksToCopy.forEach { original ->
+            val newTask = original.copy(
+                id = 0,
+                isDaily = true,
+                listId = -1,
+                isCompleted = false,
+                completedToday = false,
+                order = 0
+            )
+            val newId = repository.insertTask(newTask)
+            insertedNewTasks.add(newTask.copy(id = newId))
+
+            val subtasks = repository.getSubtasksForTask(original.id).first()
+            subtasks.forEachIndexed { index, st ->
+                repository.insertSubtask(
+                    Subtask(
+                        parentTaskId = newId,
+                        title = st.title,
+                        durationSeconds = if (_disableTimers.value) 0 else st.durationSeconds,
+                        isCompleted = false,
+                        order = index
+                    )
+                )
+            }
+        }
+
+        // Reorder within dailies
+        val currentDaily = repository.getAllDailyTasks().first().toMutableList()
+        val byId = insertedNewTasks.map { it.id }.toSet()
+        val existingWithoutInserted = currentDaily.filter { it.id !in byId }.toMutableList()
+        val safeIndex = targetPosition.coerceIn(0, existingWithoutInserted.size).coerceAtLeast(0)
+        existingWithoutInserted.addAll(safeIndex, insertedNewTasks)
+        existingWithoutInserted.forEachIndexed { idx, task -> repository.updateTaskOrder(task.id, idx) }
+        refreshDailyTasks()
     }
     fun renameList(listId: Int, newName: String) {
         viewModelScope.launch {
