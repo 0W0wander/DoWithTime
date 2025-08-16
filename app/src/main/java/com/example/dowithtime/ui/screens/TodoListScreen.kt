@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 
 import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -38,6 +39,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -99,7 +103,8 @@ fun TaskItem(
     onToggleDaily: () -> Unit,
     modifier: Modifier = Modifier,
     showDuration: Boolean = true,
-    displayedDurationSeconds: Int? = null
+    displayedDurationSeconds: Int? = null,
+    isDropTarget: Boolean = false
 ) {
     // Determine if this is a completed daily task
     val isCompletedDaily = task.isDaily && task.completedToday
@@ -112,9 +117,11 @@ fun TaskItem(
             }
             .clickable { onEdit() },
         colors = CardDefaults.cardColors(
-            containerColor = if (isCompletedDaily) MaterialTheme.colorScheme.surfaceVariant.copy(
-                alpha = 0.3f
-            ) else MaterialTheme.colorScheme.surface
+            containerColor = when {
+                isDropTarget -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                isCompletedDaily -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                else -> MaterialTheme.colorScheme.surface
+            }
         ),
         elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
         shape = RoundedCornerShape(8.dp)
@@ -1978,10 +1985,19 @@ fun TodoListScreen(
                                 }
                             } else {
                                 // Task list with working drag and drop
+                                // Hover index for visual target highlight while dragging
+                                var dragHoverIndex by remember { mutableStateOf<Int?>(null) }
+                                // Track which task is currently being dragged to avoid highlighting itself
+                                var draggingTaskId by remember { mutableStateOf<Int?>(null) }
+                                // Drag-and-drop reorderable task list
+                                var listTopY by remember { mutableStateOf(0f) }
                                 LazyColumn(
                                     modifier = Modifier
                                         .fillMaxWidth()
-                                        .padding(bottom = 56.dp),
+                                        .padding(bottom = 56.dp)
+                                        .onGloballyPositioned { coords ->
+                                            listTopY = coords.positionInRoot().y
+                                        },
                                     verticalArrangement = Arrangement.spacedBy(6.dp),
                                     state = listState
                                 ) {
@@ -1989,6 +2005,16 @@ fun TodoListScreen(
                                         items = filteredTasks,
                                         key = { _, task -> task.id }
                                     ) { index, task ->
+                                        // Reorder by long-press drag with a picked-up card that follows the finger
+                                        var isDragging by remember { mutableStateOf(false) }
+                                        var itemHeightPx by remember { mutableStateOf(0f) }
+                                        var dragOffset by remember { mutableStateOf(0f) }
+                                        val rowSpacingPx = with(LocalDensity.current) { 6.dp.toPx() }
+                                        // Gesture-scoped starting index to avoid staleness after reordering
+                                        var gestureStartIndex by remember { mutableStateOf(index) }
+                                        var itemTopY by remember { mutableStateOf(0f) }
+                                        var startCenterY by remember { mutableStateOf(0f) }
+
                                         val timersDisabled by viewModel.disableTimers.collectAsState()
                                         val subtasks by viewModel.getSubtasksFlow(task.id).collectAsState(initial = emptyList())
                                         val displayDuration = when {
@@ -2016,9 +2042,92 @@ fun TodoListScreen(
                                                 showEditDialog = true
                                             },
                                             onToggleDaily = { viewModel.toggleDailyTask(task) },
-                                            modifier = Modifier,
+                                            modifier = Modifier
+                                                .onGloballyPositioned { coords ->
+                                                    itemHeightPx = coords.size.height.toFloat()
+                                                    itemTopY = coords.positionInRoot().y
+                                                }
+                                                .graphicsLayer {
+                                                    if (isDragging) {
+                                                        translationY = dragOffset
+                                                        shadowElevation = 12f
+                                                        alpha = 0.96f
+                                                    }
+                                                }
+                                                .zIndex(if (isDragging) 1f else 0f)
+                                                .pointerInput(task.id) {
+                                                    detectDragGesturesAfterLongPress(
+                                                        onDragStart = {
+                                                            isDragging = true
+                                                            dragOffset = 0f
+                                                            // Compute fresh start index from current list
+                                                            gestureStartIndex = filteredTasks.indexOfFirst { it.id == task.id }.coerceAtLeast(0)
+                                                            startCenterY = itemTopY + (itemHeightPx / 2f)
+                                                            dragHoverIndex = gestureStartIndex
+                                                            draggingTaskId = task.id
+                                                        },
+                                                        onDrag = { _, dragAmount ->
+                                                            dragOffset += dragAmount.y
+                                                            val centerY = startCenterY + dragOffset
+                                                            val visible = listState.layoutInfo.visibleItemsInfo
+                                                            if (visible.isNotEmpty()) {
+                                                                val first = visible.first()
+                                                                val last = visible.last()
+                                                                val topFirst = listTopY + first.offset
+                                                                val bottomLast = listTopY + last.offset + last.size
+                                                                val candidateIndex = when {
+                                                                    centerY <= topFirst -> first.index
+                                                                    centerY >= bottomLast -> last.index
+                                                                    else -> {
+                                                                        val over = visible.minByOrNull { info ->
+                                                                            val center = listTopY + info.offset + (info.size / 2f)
+                                                                            kotlin.math.abs(centerY - center)
+                                                                        }
+                                                                        over?.index ?: gestureStartIndex
+                                                                    }
+                                                                }
+                                                                dragHoverIndex = candidateIndex
+                                                            }
+                                                        },
+                                                        onDragEnd = {
+                                                            val centerY = startCenterY + dragOffset
+                                                            val visible = listState.layoutInfo.visibleItemsInfo
+                                                            val target = if (visible.isNotEmpty()) {
+                                                                val first = visible.first()
+                                                                val last = visible.last()
+                                                                val topFirst = listTopY + first.offset
+                                                                val bottomLast = listTopY + last.offset + last.size
+                                                                when {
+                                                                    centerY <= topFirst -> first.index
+                                                                    centerY >= bottomLast -> last.index
+                                                                    else -> {
+                                                                        val over = visible.minByOrNull { info ->
+                                                                            val center = listTopY + info.offset + (info.size / 2f)
+                                                                            kotlin.math.abs(centerY - center)
+                                                                        }
+                                                                        over?.index ?: gestureStartIndex
+                                                                    }
+                                                                }
+                                                            } else gestureStartIndex
+                                                            if (target != gestureStartIndex) {
+                                                                viewModel.updateTaskWithOrder(task, target)
+                                                            }
+                                                            isDragging = false
+                                                            dragOffset = 0f
+                                                            dragHoverIndex = null
+                                                            draggingTaskId = null
+                                                        },
+                                                        onDragCancel = {
+                                                            isDragging = false
+                                                            dragOffset = 0f
+                                                            dragHoverIndex = null
+                                                            draggingTaskId = null
+                                                        }
+                                                    )
+                                                },
                                             showDuration = !timersDisabled,
-                                            displayedDurationSeconds = displayDuration
+                                            displayedDurationSeconds = displayDuration,
+                                            isDropTarget = (dragHoverIndex == index) && (draggingTaskId != task.id)
                                         )
                                     }
                                 }
