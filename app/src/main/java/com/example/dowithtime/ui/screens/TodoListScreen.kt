@@ -1463,7 +1463,7 @@ fun PasteToListDialog(
     onDismiss: () -> Unit,
     onPasteTasks: (Int, Int) -> Unit
 ) {
-    var selectedTargetListId by remember { mutableStateOf(0) } // 0 for unselected, -1 for daily, positive for regular lists
+    var selectedTargetListId by remember { mutableStateOf(0) } // 0 for unselected, positive for regular lists
     var targetPosition by remember { mutableStateOf(TextFieldValue("1")) }
     var positionError by remember { mutableStateOf(false) }
     var expanded by remember { mutableStateOf(false) }
@@ -1493,11 +1493,8 @@ fun PasteToListDialog(
                 // Dropdown for target list selection
                 Box {
                     OutlinedTextField(
-                        value = when (selectedTargetListId) {
-                            -1 -> "Dailies"
-                            else -> taskLists.find { it.id == selectedTargetListId }?.name
-                                ?: "Select a list"
-                        },
+                        value = taskLists.find { it.id == selectedTargetListId }?.name
+                            ?: "Select a list",
                         onValueChange = {},
                         readOnly = true,
                         trailingIcon = {
@@ -1521,15 +1518,6 @@ fun PasteToListDialog(
                         onDismissRequest = { expanded = false },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        // Daily option
-                        DropdownMenuItem(
-                            text = { Text("Dailies") },
-                            onClick = {
-                                selectedTargetListId = -1
-                                expanded = false
-                            }
-                        )
-
                         // Regular lists
                         taskLists.forEach { list ->
                             DropdownMenuItem(

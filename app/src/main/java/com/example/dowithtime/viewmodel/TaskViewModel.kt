@@ -1180,14 +1180,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             if (tasksToPaste.isNotEmpty()) {
-                val isTargetDaily = targetListId == -1 // -1 represents daily list
-                if (isTargetDaily) {
-                    // Deep-copy into Dailies (new IDs, preserve title/duration, clone subtasks)
-                    duplicateTasksIntoDailies(tasksToPaste, targetPosition)
-                } else {
-                    // Deep-copy into a regular list (new IDs, clone subtasks)
-                    duplicateTasksIntoList(tasksToPaste, targetListId, targetPosition)
-                }
+                // Deep-copy into a regular list (new IDs, clone subtasks)
+                duplicateTasksIntoList(tasksToPaste, targetListId, targetPosition)
                 uploadToCloud()
             }
         }
@@ -1237,44 +1231,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    private suspend fun duplicateTasksIntoDailies(tasksToCopy: List<Task>, targetPosition: Int) {
-        // Insert copies as daily tasks
-        val insertedNewTasks = mutableListOf<Task>()
-        tasksToCopy.forEach { original ->
-            val newTask = original.copy(
-                id = 0,
-                isDaily = true,
-                listId = -1,
-                isCompleted = false,
-                completedToday = false,
-                order = 0
-            )
-            val newId = repository.insertTask(newTask)
-            insertedNewTasks.add(newTask.copy(id = newId))
 
-            val subtasks = repository.getSubtasksForTask(original.id).first()
-            subtasks.forEachIndexed { index, st ->
-                repository.insertSubtask(
-                    Subtask(
-                        parentTaskId = newId,
-                        title = st.title,
-                        durationSeconds = if (_disableTimers.value) 0 else st.durationSeconds,
-                        isCompleted = false,
-                        order = index
-                    )
-                )
-            }
-        }
-
-        // Reorder within dailies
-        val currentDaily = repository.getAllDailyTasks().first().toMutableList()
-        val byId = insertedNewTasks.map { it.id }.toSet()
-        val existingWithoutInserted = currentDaily.filter { it.id !in byId }.toMutableList()
-        val safeIndex = targetPosition.coerceIn(0, existingWithoutInserted.size).coerceAtLeast(0)
-        existingWithoutInserted.addAll(safeIndex, insertedNewTasks)
-        existingWithoutInserted.forEachIndexed { idx, task -> repository.updateTaskOrder(task.id, idx) }
-        refreshDailyTasks()
-    }
     fun renameList(listId: Int, newName: String) {
         viewModelScope.launch {
             val list = _taskLists.value.find { it.id == listId }
