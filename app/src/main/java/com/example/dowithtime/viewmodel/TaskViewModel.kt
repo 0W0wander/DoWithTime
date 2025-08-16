@@ -114,10 +114,18 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val _disableTimers = MutableStateFlow(false)
     val disableTimers: StateFlow<Boolean> = _disableTimers.asStateFlow()
     
+    // Flag to prevent multiple creations of the default "Inbox" list
+    private val _defaultInboxCreated = MutableStateFlow(false)
+    
     init {
         val database = AppDatabase.getDatabase(application)
         repository = TaskRepository(database.taskDao())
         cloudSync = CloudSync(application)
+        
+        // Ensure default "Inbox" list exists
+        viewModelScope.launch {
+            ensureDefaultInboxList()
+        }
         
         // Set loading to true initially to prevent flash of completed tasks
         _isLoading.value = true
@@ -159,6 +167,55 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         _disableTimers.value = prefs.getBoolean("disable_timers", false)
 
         // Removed sample seeding for CTDAD history
+    }
+    
+    private suspend fun ensureDefaultInboxList() {
+        // Use a flag to prevent multiple creations during the same app session
+        if (_defaultInboxCreated.value) return
+        
+        try {
+            // First, check if there are multiple "Inbox" lists and clean them up
+            val allLists = repository.getAllTaskLists().first()
+            val inboxLists = allLists.filter { it.name == "Inbox" }
+            
+            if (inboxLists.size > 1) {
+                // Keep only the first one, delete the rest
+                for (i in 1 until inboxLists.size) {
+                    repository.deleteTaskList(inboxLists[i])
+                }
+                // Refresh the lists
+                _taskLists.value = repository.getAllTaskLists().first()
+            }
+            
+            // Check if "Inbox" list exists (after cleanup)
+            val existingInbox = repository.getTaskListByName("Inbox")
+            if (existingInbox == null) {
+                // Create the default "Inbox" list
+                val inboxList = TaskList(name = "Inbox")
+                repository.insertTaskList(inboxList)
+                
+                // Mark that we've created the default inbox
+                _defaultInboxCreated.value = true
+                
+                // Small delay to ensure database operation is complete
+                kotlinx.coroutines.delay(100)
+                
+                // Refresh the task lists to include the new Inbox list
+                _taskLists.value = repository.getAllTaskLists().first()
+                
+                // If no current list is set, set the Inbox list as current
+                if (_currentListId.value == null) {
+                    _currentListId.value = inboxList.id
+                }
+            } else {
+                // Inbox already exists, mark as created
+                _defaultInboxCreated.value = true
+            }
+        } catch (e: Exception) {
+            // If there's an error, still mark as created to prevent retries
+            _defaultInboxCreated.value = true
+            println("Error ensuring default inbox list: ${e.message}")
+        }
     }
     
     private fun loadData() {
@@ -254,6 +311,9 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         // Reload data - but don't populate _tasks with all tasks
         _taskLists.value = repository.getAllTaskLists().first()
         _dailyTasks.value = repository.getAllDailyTasks().first()
+        
+        // Ensure default "Inbox" list exists after cloud sync
+        ensureDefaultInboxList()
         
         // Set current list to first available list if none is set
         if (_taskLists.value.isNotEmpty() && _currentListId.value == null) {
@@ -1309,6 +1369,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     
     override fun onCleared() {
         super.onCleared()
+        // Reset the default inbox flag for next app session
+        _defaultInboxCreated.value = false
         // Unregister broadcast receiver
         nextTaskReceiver?.let { receiver ->
             getApplication<Application>().unregisterReceiver(receiver)

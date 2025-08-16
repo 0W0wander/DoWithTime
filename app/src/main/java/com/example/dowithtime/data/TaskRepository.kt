@@ -18,6 +18,7 @@ class TaskRepository(private val taskDao: TaskDao) {
 
     // TaskList methods
     fun getAllTaskLists(): Flow<List<TaskList>> = taskDao.getAllTaskLists()
+    suspend fun getTaskListByName(name: String): TaskList? = taskDao.getTaskListByName(name)
     suspend fun insertTaskList(taskList: TaskList) = taskDao.insertTaskList(taskList)
     suspend fun updateTaskList(taskList: TaskList) = taskDao.updateTaskList(taskList)
     suspend fun deleteTaskList(taskList: TaskList) = taskDao.deleteTaskList(taskList)

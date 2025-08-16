@@ -84,6 +84,9 @@ interface TaskDao {
     @Query("SELECT * FROM task_lists")
     fun getAllTaskLists(): Flow<List<TaskList>>
     
+    @Query("SELECT * FROM task_lists WHERE name = :name LIMIT 1")
+    suspend fun getTaskListByName(name: String): TaskList?
+    
     @Insert
     suspend fun insertTaskList(taskList: TaskList)
     
