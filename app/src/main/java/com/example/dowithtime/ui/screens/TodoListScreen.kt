@@ -705,8 +705,8 @@ fun AddTaskDialog(
                 enabled = run {
                     val minutesInt = minutes.toIntOrNull() ?: 0
                     val secondsInt = seconds.toIntOrNull() ?: 0
-                    // If timers are enabled and no subtasks, require BOTH minutes and seconds > 0
-                    !( !timersDisabled && newSubtasks.isEmpty() && (minutesInt <= 0 || secondsInt <= 0) )
+                    // If timers are enabled and no subtasks, require at least one non-zero value
+                    !( !timersDisabled && newSubtasks.isEmpty() && (minutesInt <= 0 && secondsInt <= 0) )
                 },
                 onClick = {
                     if (title.isBlank()) {
@@ -718,8 +718,8 @@ fun AddTaskDialog(
                     val minutesInt = minutes.toIntOrNull() ?: 0
                     val secondsInt = seconds.toIntOrNull() ?: 0
                     val totalSeconds = minutesInt * 60 + secondsInt
-                    // Enforce BOTH minutes and seconds > 0 when timers are enabled and no subtasks
-                    if (!timersDisabled && newSubtasks.isEmpty() && (minutesInt <= 0 || secondsInt <= 0)) {
+                    // Enforce at least one non-zero value when timers are enabled and no subtasks
+                    if (!timersDisabled && newSubtasks.isEmpty() && (minutesInt <= 0 && secondsInt <= 0)) {
                         durationError = true
                                  minutesFocusRequester.requestFocus()
                         return@Button

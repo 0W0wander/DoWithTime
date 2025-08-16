@@ -1286,8 +1286,15 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         existingWithoutInserted.addAll(safeIndex, insertedNewTasks)
         existingWithoutInserted.forEachIndexed { idx, task -> repository.updateTaskOrder(task.id, idx) }
 
+        // Always refresh the target list's tasks, but don't change the current list selection
         if (targetListId == _currentListId.value) {
             refreshTasksForCurrentList(targetListId)
+        } else {
+            // If pasting to a different list, just refresh that list's tasks without changing selection
+            repository.getIncompleteTasksByList(targetListId).collect { taskList ->
+                // Update the incomplete tasks state for the target list
+                repository.updateIncompleteTasksState(taskList)
+            }
         }
     }
 
