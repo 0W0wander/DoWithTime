@@ -850,9 +850,19 @@ fun EditTaskDialog(
     var newSubtaskMinutes by remember { mutableStateOf("") }
     var newSubtaskSeconds by remember { mutableStateOf("") }
     
+    // Coroutine scope for animations
+    val scope = rememberCoroutineScope()
+    
     // Advanced options state
     var advancedExpanded by remember { mutableStateOf(false) }
     var showSubtaskEditor by remember { mutableStateOf(false) }
+    // If this task already has subtasks, open the mini list view editor by default
+    LaunchedEffect(subtasks.size) {
+        if (subtasks.isNotEmpty()) {
+            showSubtaskEditor = true
+            advancedExpanded = true
+        }
+    }
 
     fun clearForm() {
         title = ""
@@ -886,39 +896,72 @@ fun EditTaskDialog(
                     .fillMaxWidth()
                     .padding(vertical = 8.dp)
             ) {
-                // Task title field
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-                ) {
-                    OutlinedTextField(
-                        value = title,
-                        onValueChange = {
-                            title = it
-                            titleError = false
-                        },
-                        label = { Text("Task Title") },
-                        isError = titleError,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .focusRequester(titleFocusRequester),
-                        singleLine = true,
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = Color.Transparent,
-                            focusedLabelColor = MaterialTheme.colorScheme.primary
-                        ),
-                        keyboardOptions = KeyboardOptions(
-                            imeAction = ImeAction.Next
-                        ),
-                        keyboardActions = KeyboardActions(
-                            onNext = { minutesFocusRequester.requestFocus() }
-                        )
+                // When subtasks exist, present a mini list-view layout: title as list title,
+                // small inline position field, then the subtask list taking most space.
+                if (subtasks.isNotEmpty()) {
+                    // Title as list title (compact)
+                    Text(
+                        text = "${task.title}",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
                     )
+                    // Compact position field row
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = order,
+                            onValueChange = {
+                                order = it.filter { ch -> ch.isDigit() }
+                                orderError = false
+                            },
+                            label = { Text("Position (1, 2, 3, etc.)") },
+                            singleLine = true,
+                            isError = orderError,
+                            modifier = Modifier.width(160.dp)
+                        )
+                    }
+                }
+                // Task title field. When subtasks exist, keep editable title but the top-of-dialog
+                // “list title” line already shows the current title; keep this editable for changes.
+                if (subtasks.isEmpty()) {
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = title,
+                            onValueChange = {
+                                title = it
+                                titleError = false
+                            },
+                            label = { Text("Task Title") },
+                            isError = titleError,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .focusRequester(titleFocusRequester),
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = Color.Transparent,
+                                focusedLabelColor = MaterialTheme.colorScheme.primary
+                            ),
+                            keyboardOptions = KeyboardOptions(
+                                imeAction = ImeAction.Next
+                            ),
+                            keyboardActions = KeyboardActions(
+                                onNext = { minutesFocusRequester.requestFocus() }
+                            )
+                        )
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(20.dp))
@@ -1013,80 +1056,82 @@ fun EditTaskDialog(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
-                // Position section
-                Text(
-                    text = "Position",
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
-                    ),
-                    shape = RoundedCornerShape(12.dp),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-                ) {
-                    OutlinedTextField(
-                        value = order,
-                        onValueChange = {
-                            order = it.filter { char -> char.isDigit() }
-                            orderError = false
-                        },
-                        label = { Text("Position (1, 2, 3, etc.)") },
-                        isError = orderError,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .focusRequester(orderFocusRequester),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(
-                            keyboardType = KeyboardType.Number,
-                            imeAction = ImeAction.Done
-                        ),
-                        keyboardActions = KeyboardActions(
-                            onDone = {
-                                // Validate and save
-                                if (title.isBlank()) {
-                                    titleError = true
-                                    titleFocusRequester.requestFocus()
-                                    return@KeyboardActions
-                                }
-
-                                val minutesInt = minutes.toIntOrNull() ?: 0
-                                val secondsInt = seconds.toIntOrNull() ?: 0
-                                val rawTotalSeconds = minutesInt * 60 + secondsInt
-                                val usingSubtasks = subtasks.isNotEmpty()
-                                val effectiveTotalSeconds = if (timersDisabled || usingSubtasks) 0 else rawTotalSeconds
-
-                                if (!timersDisabled && !usingSubtasks && effectiveTotalSeconds <= 0) {
-                                    durationError = true
-                                    minutesFocusRequester.requestFocus()
-                                    return@KeyboardActions
-                                }
-
-                                val orderInt = order.toIntOrNull() ?: 0
-                                if (orderInt <= 0) {
-                                    orderError = true
-                                    orderFocusRequester.requestFocus()
-                                    return@KeyboardActions
-                                }
-
-                                onEditTask(title, effectiveTotalSeconds, task.isDaily, orderInt - 1)
-                            }
-                        ),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = Color.Transparent,
-                            focusedLabelColor = MaterialTheme.colorScheme.primary
-                        )
+                // Position section (full-width variant shown only when there are no subtasks)
+                if (subtasks.isEmpty()) {
+                    Text(
+                        text = "Position",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = MaterialTheme.colorScheme.onSurface
                     )
-                }
 
-                Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Card(
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f)
+                        ),
+                        shape = RoundedCornerShape(12.dp),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
+                    ) {
+                        OutlinedTextField(
+                            value = order,
+                            onValueChange = {
+                                order = it.filter { char -> char.isDigit() }
+                                orderError = false
+                            },
+                            label = { Text("Position (1, 2, 3, etc.)") },
+                            isError = orderError,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .focusRequester(orderFocusRequester),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(
+                                keyboardType = KeyboardType.Number,
+                                imeAction = ImeAction.Done
+                            ),
+                            keyboardActions = KeyboardActions(
+                                onDone = {
+                                    // Validate and save
+                                    if (title.isBlank()) {
+                                        titleError = true
+                                        titleFocusRequester.requestFocus()
+                                        return@KeyboardActions
+                                    }
+
+                                    val minutesInt = minutes.toIntOrNull() ?: 0
+                                    val secondsInt = seconds.toIntOrNull() ?: 0
+                                    val rawTotalSeconds = minutesInt * 60 + secondsInt
+                                    val usingSubtasks = subtasks.isNotEmpty()
+                                    val effectiveTotalSeconds = if (timersDisabled || usingSubtasks) 0 else rawTotalSeconds
+
+                                    if (!timersDisabled && !usingSubtasks && effectiveTotalSeconds <= 0) {
+                                        durationError = true
+                                        minutesFocusRequester.requestFocus()
+                                        return@KeyboardActions
+                                    }
+
+                                    val orderInt = order.toIntOrNull() ?: 0
+                                    if (orderInt <= 0) {
+                                        orderError = true
+                                        orderFocusRequester.requestFocus()
+                                        return@KeyboardActions
+                                    }
+
+                                    onEditTask(title, effectiveTotalSeconds, task.isDaily, orderInt - 1)
+                                }
+                            ),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                unfocusedBorderColor = Color.Transparent,
+                                focusedLabelColor = MaterialTheme.colorScheme.primary
+                            )
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(20.dp))
+                }
 
                 // Advanced options expander (Subtasks)
                 Card(
@@ -1107,7 +1152,7 @@ fun EditTaskDialog(
                                 .padding(horizontal = 12.dp, vertical = 10.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                    Text(
+                            Text(
                                 text = "Subtasks",
                                 fontSize = 16.sp,
                                 fontWeight = FontWeight.SemiBold,
@@ -1120,7 +1165,7 @@ fun EditTaskDialog(
                             )
                         }
                         if (advancedExpanded) {
-                Divider()
+                            Divider()
                             if (!showSubtaskEditor) {
                                 Row(
                                     modifier = Modifier
@@ -1133,70 +1178,179 @@ fun EditTaskDialog(
                                     }
                                 }
                             } else {
-                                // Subtasks editor takes majority of dialog space
+                                // Subtasks editor takes majority of dialog space (mini list view)
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(12.dp)
                                 ) {
-                                    Text(
-                                        "Subtasks",
-                                        fontSize = 18.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                Spacer(Modifier.height(8.dp))
-                                    // Existing subtasks list
+                                    Spacer(Modifier.height(4.dp))
+                                    // Mini list view with drag & drop reorder
+                                    var subListTopY by remember { mutableStateOf(0f) }
+                                    val subListState = rememberLazyListState()
+                                    var isDraggingSub by remember { mutableStateOf(false) }
+                                    var subDragOffset by remember { mutableStateOf(0f) }
+                                    var subItemHeightPx by remember { mutableStateOf(0f) }
+                                    var subItemTopY by remember { mutableStateOf(0f) }
+                                    var subStartCenterY by remember { mutableStateOf(0f) }
+                                    var subDragHoverIndex by remember { mutableStateOf<Int?>(null) }
+                                    var subDraggingId by remember { mutableStateOf<Int?>(null) }
+                                    var subGestureStartIndex by remember { mutableStateOf(0) }
+
                                     LazyColumn(
-                                        modifier = Modifier.heightIn(max = 360.dp),
+                                        modifier = Modifier
+                                            .heightIn(max = 360.dp)
+                                            .onGloballyPositioned { subListTopY = it.positionInRoot().y },
+                                        state = subListState,
                                         verticalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
                                         itemsIndexed(subtasks) { index, st ->
-                        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Text("${index + 1}.", modifier = Modifier.width(24.dp))
-                            Column(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable {
-                                        newSubtaskTitle = st.title
-                                        val m = st.durationSeconds / 60
-                                        val s = st.durationSeconds % 60
-                                        newSubtaskMinutes = if (m == 0) "" else m.toString()
-                                        newSubtaskSeconds = if (s == 0) "" else s.toString()
-                                    }
-                            ) {
-                                Text(st.title, fontWeight = FontWeight.Medium)
-                                                    Text(
-                                                        formatDuration(st.durationSeconds),
-                                                        fontSize = 12.sp,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            val hovered = subDragHoverIndex == index
+                                            Card(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .onGloballyPositioned { coords ->
+                                                        subItemHeightPx = coords.size.height.toFloat()
+                                                        subItemTopY = coords.positionInRoot().y
+                                                    }
+                                                    .graphicsLayer {
+                                                        if (isDraggingSub && subDraggingId == st.id) {
+                                                            translationY = subDragOffset
+                                                            scaleX = 1.02f
+                                                            scaleY = 1.02f
+                                                            shadowElevation = 12f
+                                                            alpha = 0.98f
+                                                        }
+                                                    }
+                                                    .zIndex(if (isDraggingSub && subDraggingId == st.id) 1f else 0f)
+                                                    .pointerInput(st.id) {
+                                                        detectDragGestures(
+                                                            onDragStart = {
+                                                                isDraggingSub = true
+                                                                subDragOffset = 0f
+                                                                subGestureStartIndex = index
+                                                                subStartCenterY = subItemTopY + (subItemHeightPx / 2f)
+                                                                subDragHoverIndex = index
+                                                                subDraggingId = st.id
+                                                            },
+                                                            onDrag = { _, dragAmount ->
+                                                                subDragOffset += dragAmount.y
+                                                                val centerY = subStartCenterY + subDragOffset
+                                                                val visible = subListState.layoutInfo.visibleItemsInfo
+                                                                val viewportTop = subListTopY
+                                                                val viewportBottom = viewportTop + subListState.layoutInfo.viewportEndOffset
+                                                                val edge = 64f
+                                                                val firstIndex = subListState.firstVisibleItemIndex
+                                                                val lastIndex = visible.lastOrNull()?.index ?: firstIndex
+                                                                if (centerY < viewportTop + edge) {
+                                                                    scope.launch { subListState.animateScrollToItem((firstIndex - 1).coerceAtLeast(0)) }
+                                                                } else if (centerY > viewportBottom - edge) {
+                                                                    scope.launch { subListState.animateScrollToItem((lastIndex + 1).coerceAtMost(subtasks.lastIndex)) }
+                                                                }
+                                                                if (visible.isNotEmpty()) {
+                                                                    val first = visible.first()
+                                                                    val last = visible.last()
+                                                                    val topFirst = subListTopY + first.offset
+                                                                    val bottomLast = subListTopY + last.offset + last.size
+                                                                    val candidateIndex = when {
+                                                                        centerY <= topFirst -> 0
+                                                                        centerY >= bottomLast -> subtasks.lastIndex
+                                                                        else -> {
+                                                                            val over = visible.minByOrNull { info ->
+                                                                                val center = subListTopY + info.offset + (info.size / 2f)
+                                                                                kotlin.math.abs(centerY - center)
+                                                                            }
+                                                                            over?.index ?: subGestureStartIndex
+                                                                        }
+                                                                    }
+                                                                    subDragHoverIndex = candidateIndex
+                                                                }
+                                                            },
+                                                            onDragEnd = {
+                                                                val centerY = subStartCenterY + subDragOffset
+                                                                val visible = subListState.layoutInfo.visibleItemsInfo
+                                                                val target = if (visible.isNotEmpty()) {
+                                                                    val first = visible.first()
+                                                                    val last = visible.last()
+                                                                    val topFirst = subListTopY + first.offset
+                                                                    val bottomLast = subListTopY + last.offset + last.size
+                                                                    when {
+                                                                        centerY <= topFirst -> 0
+                                                                        centerY >= bottomLast -> subtasks.lastIndex
+                                                                        else -> {
+                                                                            val over = visible.minByOrNull { info ->
+                                                                                val center = subListTopY + info.offset + (info.size / 2f)
+                                                                                kotlin.math.abs(centerY - center)
+                                                                            }
+                                                                            over?.index ?: subGestureStartIndex
+                                                                        }
+                                                                    }
+                                                                } else subGestureStartIndex
+                                                                if (target != subGestureStartIndex) {
+                                                                    val reordered = subtasks.toMutableList().apply {
+                                                                        val moved = removeAt(subGestureStartIndex)
+                                                                        add(target, moved)
+                                                                    }
+                                                                    viewModel.reorderSubtasks(task.id, reordered)
+                                                                }
+                                                                isDraggingSub = false
+                                                                subDragOffset = 0f
+                                                                subDragHoverIndex = null
+                                                                subDraggingId = null
+                                                            },
+                                                            onDragCancel = {
+                                                                isDraggingSub = false
+                                                                subDragOffset = 0f
+                                                                subDragHoverIndex = null
+                                                                subDraggingId = null
+                                                            }
+                                                        )
+                                                    },
+                                                colors = CardDefaults.cardColors(
+                                                    containerColor = if (hovered) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else MaterialTheme.colorScheme.surface
+                                                ),
+                                                elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                                                shape = RoundedCornerShape(8.dp)
+                                            ) {
+                                                Row(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                                    verticalAlignment = Alignment.CenterVertically
+                                                ) {
+                                                    Icon(
+                                                        imageVector = Icons.Default.Menu,
+                                                        contentDescription = "Drag",
+                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        modifier = Modifier.padding(end = 6.dp)
                                                     )
-                            }
-                            IconButton(onClick = {
-                                if (index > 0) {
-                                    val reordered = subtasks.toMutableList().apply {
-                                        removeAt(index)
-                                        add(index - 1, st)
+                                                    Text("${index + 1}.", modifier = Modifier.width(24.dp))
+                                                    Column(
+                                                        modifier = Modifier
+                                                            .weight(1f)
+                                                            .clickable {
+                                                                newSubtaskTitle = st.title
+                                                                val m = st.durationSeconds / 60
+                                                                val s = st.durationSeconds % 60
+                                                                newSubtaskMinutes = if (m == 0) "" else m.toString()
+                                                                newSubtaskSeconds = if (s == 0) "" else s.toString()
+                                                            }
+                                                    ) {
+                                                        Text(st.title, fontWeight = FontWeight.SemiBold, fontSize = 15.sp)
+                                                        Text(
+                                                            formatDuration(st.durationSeconds),
+                                                            fontSize = 12.sp,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                        )
+                                                    }
+                                                    IconButton(onClick = { viewModel.deleteSubtask(st.id) }) {
+                                                        Icon(Icons.Default.Delete, contentDescription = "Delete subtask")
+                                                    }
+                                                }
+                                            }
+                                        }
                                     }
-                                    viewModel.reorderSubtasks(task.id, reordered)
-                                }
-                            }) { Icon(Icons.Default.KeyboardArrowUp, contentDescription = null) }
-                            IconButton(onClick = {
-                                if (index < subtasks.size - 1) {
-                                    val reordered = subtasks.toMutableList().apply {
-                                        removeAt(index)
-                                        add(index + 1, st)
-                                    }
-                                    viewModel.reorderSubtasks(task.id, reordered)
-                                }
-                            }) { Icon(Icons.Default.KeyboardArrowDown, contentDescription = null) }
-                            IconButton(onClick = { viewModel.deleteSubtask(st.id) }) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete subtask")
-                            }
-                        }
-                    }
-                }
-                Spacer(Modifier.height(12.dp))
+                                    Spacer(Modifier.height(12.dp))
                                     // Subtask entry fields
                                     OutlinedTextField(
                                         value = newSubtaskTitle,
@@ -1221,23 +1375,23 @@ fun EditTaskDialog(
                                             singleLine = true,
                                             modifier = Modifier.width(100.dp)
                                         )
-                    Button(onClick = {
-                        val m = newSubtaskMinutes.toIntOrNull() ?: 0
-                        val s = newSubtaskSeconds.toIntOrNull() ?: 0
-                        val total = if (timersDisabled) 0 else m * 60 + s
-                        if (newSubtaskTitle.isNotBlank() && (timersDisabled || total > 0)) {
-                            // If editing an existing subtask title, update that subtask
-                            val existing = subtasks.firstOrNull { it.title == newSubtaskTitle }
-                            if (existing != null) {
-                                viewModel.updateSubtask(existing.copy(title = newSubtaskTitle, durationSeconds = total))
-                            } else {
-                                viewModel.addSubtask(task.id, newSubtaskTitle, total)
-                            }
-                            newSubtaskTitle = ""
-                            newSubtaskMinutes = ""
-                            newSubtaskSeconds = ""
-                        }
-                    }) { Text("Add") }
+                                        Button(onClick = {
+                                            val m = newSubtaskMinutes.toIntOrNull() ?: 0
+                                            val s = newSubtaskSeconds.toIntOrNull() ?: 0
+                                            val total = if (timersDisabled) 0 else m * 60 + s
+                                            if (newSubtaskTitle.isNotBlank() && (timersDisabled || total > 0)) {
+                                                // If editing an existing subtask title, update that subtask
+                                                val existing = subtasks.firstOrNull { it.title == newSubtaskTitle }
+                                                if (existing != null) {
+                                                    viewModel.updateSubtask(existing.copy(title = newSubtaskTitle, durationSeconds = total))
+                                                } else {
+                                                    viewModel.addSubtask(task.id, newSubtaskTitle, total)
+                                                }
+                                                newSubtaskTitle = ""
+                                                newSubtaskMinutes = ""
+                                                newSubtaskSeconds = ""
+                                            }
+                                        }) { Text("Add") }
                                     }
                                     Spacer(Modifier.height(16.dp))
                                     Row(
