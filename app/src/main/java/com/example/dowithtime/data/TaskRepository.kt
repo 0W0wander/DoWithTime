@@ -109,4 +109,18 @@ class TaskRepository(private val taskDao: TaskDao) {
     suspend fun insertCompletedLog(log: CompletedLog) = taskDao.insertCompletedLog(log)
     suspend fun countCompletedOnDate(date: String): Int = taskDao.countCompletedOnDate(date)
     fun getCompletedLogsByDate(date: String): Flow<List<CompletedLog>> = taskDao.getCompletedLogsByDate(date)
+
+    // Presets
+    fun getAllPresets(): Flow<List<Preset>> = taskDao.getAllPresets()
+    fun getPresetSubtasks(presetId: Int): Flow<List<PresetSubtask>> = taskDao.getPresetSubtasks(presetId)
+    suspend fun insertPreset(preset: Preset): Int = taskDao.insertPreset(preset).toInt()
+    suspend fun insertPresetSubtask(subtask: PresetSubtask) = taskDao.insertPresetSubtask(subtask)
+    suspend fun updatePresetSubtask(subtask: PresetSubtask) = taskDao.updatePresetSubtask(subtask)
+    suspend fun updatePresetSubtaskOrder(subtaskId: Int, newOrder: Int) = taskDao.updatePresetSubtaskOrder(subtaskId, newOrder)
+    suspend fun deletePresetSubtask(subtaskId: Int) = taskDao.deletePresetSubtask(subtaskId)
+    suspend fun updatePreset(preset: Preset) = taskDao.updatePreset(preset)
+    suspend fun deletePreset(presetId: Int) {
+        taskDao.deletePresetSubtasks(presetId)
+        taskDao.deletePreset(presetId)
+    }
 } 

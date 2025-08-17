@@ -109,4 +109,35 @@ interface TaskDao {
     
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertAllTaskLists(taskLists: List<TaskList>)
+
+    // Presets
+    @Query("SELECT * FROM presets ORDER BY name ASC")
+    fun getAllPresets(): Flow<List<Preset>>
+
+    @Query("SELECT * FROM preset_subtasks WHERE presetId = :presetId ORDER BY `order` ASC")
+    fun getPresetSubtasks(presetId: Int): Flow<List<PresetSubtask>>
+
+    @Insert
+    suspend fun insertPreset(preset: Preset): Long
+
+    @Insert
+    suspend fun insertPresetSubtask(subtask: PresetSubtask)
+
+    @Update
+    suspend fun updatePresetSubtask(subtask: PresetSubtask)
+
+    @Query("UPDATE preset_subtasks SET `order` = :newOrder WHERE id = :subtaskId")
+    suspend fun updatePresetSubtaskOrder(subtaskId: Int, newOrder: Int)
+
+    @Query("DELETE FROM preset_subtasks WHERE id = :subtaskId")
+    suspend fun deletePresetSubtask(subtaskId: Int)
+
+    @Update
+    suspend fun updatePreset(preset: Preset)
+
+    @Query("DELETE FROM presets WHERE id = :presetId")
+    suspend fun deletePreset(presetId: Int)
+
+    @Query("DELETE FROM preset_subtasks WHERE presetId = :presetId")
+    suspend fun deletePresetSubtasks(presetId: Int)
 } 

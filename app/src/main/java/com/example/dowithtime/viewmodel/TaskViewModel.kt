@@ -20,6 +20,8 @@ import kotlinx.coroutines.delay
 import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.example.dowithtime.data.CloudSync
+import com.example.dowithtime.data.Preset
+import com.example.dowithtime.data.PresetSubtask
 import com.example.dowithtime.data.AppData
 import com.example.dowithtime.data.SyncStatus
 
@@ -95,6 +97,15 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val _completedLogsForDay = MutableStateFlow<List<CompletedLog>>(emptyList())
     val completedLogsForDay: StateFlow<List<CompletedLog>> = _completedLogsForDay.asStateFlow()
 
+    // Presets
+    private val _presets = MutableStateFlow<List<Preset>>(emptyList())
+    val presets: StateFlow<List<Preset>> = _presets.asStateFlow()
+    private val _presetSubtasks = MutableStateFlow<Map<Int, List<PresetSubtask>>>(emptyMap())
+    val presetSubtasks: StateFlow<Map<Int, List<PresetSubtask>>> = _presetSubtasks.asStateFlow()
+
+    // Premade tasks are represented as regular lists with a special name prefix
+    private val premadePrefix = "Premade: "
+
     // Subtasks cache for quick access
     private val _subtasksByTaskId = MutableStateFlow<Map<Int, List<Subtask>>>(emptyMap())
     val subtasksByTaskId: StateFlow<Map<Int, List<Subtask>>> = _subtasksByTaskId.asStateFlow()
@@ -116,16 +127,25 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     
     // Flag to prevent multiple creations of the default "Inbox" list
     private val _defaultInboxCreated = MutableStateFlow(false)
+    // First-run notification prompt
+    private val _showNotificationPrompt = MutableStateFlow(false)
+    val showNotificationPrompt: StateFlow<Boolean> = _showNotificationPrompt.asStateFlow()
     
     init {
         val database = AppDatabase.getDatabase(application)
         repository = TaskRepository(database.taskDao())
         cloudSync = CloudSync(application)
         
-        // Ensure default "Inbox" list exists
+        // Ensure default "Inbox" list exists and first-run setup
         viewModelScope.launch {
+            val firstRunCompleted = prefs.getBoolean("first_run_completed", false)
             ensureDefaultInboxList()
+            if (!firstRunCompleted) {
+                _showNotificationPrompt.value = true
+            }
         }
+        // No dedicated list anymore; premade template lists will be named with a prefix
+        viewModelScope.launch { _taskLists.value = repository.getAllTaskLists().first() }
         
         // Set loading to true initially to prevent flash of completed tasks
         _isLoading.value = true
@@ -144,6 +164,25 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         
         loadData()
         performAutoSync()
+
+        // Load presets
+        viewModelScope.launch {
+            repository.getAllPresets().collect { list ->
+                _presets.value = list
+            }
+        }
+        // Keep preset subtasks cache updated lazily per preset
+        viewModelScope.launch {
+            repository.getAllPresets().collect { list ->
+                list.forEach { preset ->
+                    launch {
+                        repository.getPresetSubtasks(preset.id).collect { subs ->
+                            _presetSubtasks.value = _presetSubtasks.value.toMutableMap().apply { put(preset.id, subs) }
+                        }
+                    }
+                }
+            }
+        }
 
         // Initialize CTDAD tracking
         viewModelScope.launch {
@@ -191,30 +230,51 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             val existingInbox = repository.getTaskListByName("Inbox")
             if (existingInbox == null) {
                 // Create the default "Inbox" list
-                val inboxList = TaskList(name = "Inbox")
-                repository.insertTaskList(inboxList)
-                
-                // Mark that we've created the default inbox
-                _defaultInboxCreated.value = true
-                
-                // Small delay to ensure database operation is complete
+                repository.insertTaskList(TaskList(name = "Inbox"))
+                // Allow DB to assign ID, then fetch it back
                 kotlinx.coroutines.delay(100)
-                
-                // Refresh the task lists to include the new Inbox list
+                val created = repository.getTaskListByName("Inbox")
                 _taskLists.value = repository.getAllTaskLists().first()
-                
-                // If no current list is set, set the Inbox list as current
-                if (_currentListId.value == null) {
-                    _currentListId.value = inboxList.id
+                _defaultInboxCreated.value = true
+                if (_currentListId.value == null && created != null) {
+                    _currentListId.value = created.id
+                    // Persist selection for next launch
+                    prefs.edit().putInt("last_selected_list_id", created.id).apply()
                 }
             } else {
                 // Inbox already exists, mark as created
                 _defaultInboxCreated.value = true
+                if (_currentListId.value == null) {
+                    _currentListId.value = existingInbox.id
+                    prefs.edit().putInt("last_selected_list_id", existingInbox.id).apply()
+                }
             }
         } catch (e: Exception) {
             // If there's an error, still mark as created to prevent retries
             _defaultInboxCreated.value = true
             println("Error ensuring default inbox list: ${e.message}")
+        }
+    }
+
+    fun completeFirstRunPrompt() {
+        _showNotificationPrompt.value = false
+        prefs.edit().putBoolean("first_run_completed", true).apply()
+    }
+
+    fun openNotificationSettings() {
+        try {
+            val intent = android.content.Intent(android.provider.Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                putExtra(android.provider.Settings.EXTRA_APP_PACKAGE, getApplication<Application>().packageName)
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            getApplication<Application>().startActivity(intent)
+        } catch (_: Exception) {
+            // Fallback to app settings if notification settings action not supported
+            val intent = android.content.Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = android.net.Uri.parse("package:" + getApplication<Application>().packageName)
+                addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            getApplication<Application>().startActivity(intent)
         }
     }
     
@@ -676,6 +736,12 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
     // Subtasks API
     fun getSubtasksFlow(taskId: Int) = repository.getSubtasksForTask(taskId)
+    suspend fun fetchTasksForListOnce(listId: Int): List<Task> {
+        return repository.getIncompleteTasksByList(listId).first()
+    }
+    suspend fun fetchSubtasksForTaskOnce(taskId: Int): List<Subtask> {
+        return repository.getSubtasksForTask(taskId).first()
+    }
     fun addSubtask(parentTaskId: Int, title: String, durationSeconds: Int) {
         viewModelScope.launch {
             val current = repository.getSubtasksForTask(parentTaskId).first()
@@ -693,6 +759,31 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             newOrder.forEachIndexed { index, st -> repository.updateSubtaskOrder(st.id, index) }
         }
+    }
+
+    // Presets API
+    fun createPreset(name: String, subtasks: List<Pair<String, Int>>) {
+        viewModelScope.launch {
+            val presetId = repository.insertPreset(Preset(name = name))
+            subtasks.forEachIndexed { index, (t, s) ->
+                repository.insertPresetSubtask(PresetSubtask(presetId = presetId, title = t, durationSeconds = s, order = index))
+            }
+        }
+    }
+    fun deletePreset(presetId: Int) {
+        viewModelScope.launch { repository.deletePreset(presetId) }
+    }
+
+    fun addPresetSubtask(presetId: Int, title: String, durationSeconds: Int) {
+        viewModelScope.launch {
+            val current = repository.getPresetSubtasks(presetId).first()
+            repository.insertPresetSubtask(PresetSubtask(presetId = presetId, title = title, durationSeconds = durationSeconds, order = current.size))
+        }
+    }
+    fun updatePresetSubtask(subtask: PresetSubtask) { viewModelScope.launch { repository.updatePresetSubtask(subtask) } }
+    fun deletePresetSubtask(subtaskId: Int) { viewModelScope.launch { repository.deletePresetSubtask(subtaskId) } }
+    fun reorderPresetSubtasks(presetId: Int, newOrder: List<PresetSubtask>) {
+        viewModelScope.launch { newOrder.forEachIndexed { index, st -> repository.updatePresetSubtaskOrder(st.id, index) } }
     }
     
     fun resetDailyTaskCompletion() {
