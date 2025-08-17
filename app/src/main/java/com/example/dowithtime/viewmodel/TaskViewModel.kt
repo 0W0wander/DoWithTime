@@ -1095,6 +1095,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                         val nextSubtask = subtasks[currentIndex + 1]
                         // Log time for the subtask we just finished
                         addCtdadForCurrentSegment(currentTask)
+                        // Remove the completed subtask from the task
+                        currentSub?.let { repository.deleteSubtask(it.id) }
                         _currentSubtask.value = nextSubtask
                         _timeRemaining.value = nextSubtask.durationSeconds * 1000L
                         currentStartedAtMs = System.currentTimeMillis()
@@ -1113,6 +1115,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                         // Finished last subtask, log (only if we actually had a current subtask) and clear
                         if (currentSub != null) {
                             addCtdadForCurrentSegment(currentTask)
+                            // Remove the completed last subtask from the task
+                            repository.deleteSubtask(currentSub.id)
                         }
                         _currentSubtask.value = null
                     } else if (currentIndex == -1) {
