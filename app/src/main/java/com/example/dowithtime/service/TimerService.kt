@@ -14,6 +14,9 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 class TimerService : Service() {
+    // Toggle for verbose debug logging in service
+    private val enableDebugLogs = false
+    private fun vLog(msg: String) { if (enableDebugLogs) println(msg) }
     private val binder = TimerBinder()
     private var countDownTimer: CountDownTimer? = null
     private var transitionTimer: CountDownTimer? = null
@@ -87,7 +90,7 @@ class TimerService : Service() {
     }
     
     fun startTask(task: Task) {
-        println("DEBUG: TimerService.startTask called with task: ${task.title}")
+        vLog("DEBUG: TimerService.startTask called with task: ${task.title}")
         // Stop any existing timer first
         countDownTimer?.cancel()
         transitionTimer?.cancel()
@@ -114,11 +117,12 @@ class TimerService : Service() {
         // Cancel any existing timer first
         countDownTimer?.cancel()
         
-        _isRunning.value = true
-        _isPaused.value = false
-        
         // Always use the current task's duration, never fall back to timeRemaining
         val durationToUse = _currentTask.value?.durationSeconds?.let { it * 1000L } ?: 0L
+        
+        // Only mark running when there is an actual positive duration; zero-duration tasks should not tick
+        _isRunning.value = (durationToUse > 0L)
+        _isPaused.value = false
         
         if (durationToUse > 0) {
             countDownTimer = object : CountDownTimer(durationToUse, 1000) {
@@ -134,6 +138,12 @@ class TimerService : Service() {
                     updateNotification()
                 }
             }.start()
+        } else {
+            // For zero-duration tasks, immediately show alarm and let VM handle next step
+            _timeRemaining.value = 0
+            _isRunning.value = false
+            showAlarmScreen()
+            updateNotification()
         }
     }
     
@@ -194,7 +204,7 @@ class TimerService : Service() {
     }
     
     private fun nextTask() {
-        println("DEBUG: TimerService.nextTask called, showAlarm: ${_showAlarm.value}")
+        vLog("DEBUG: TimerService.nextTask called, showAlarm: ${_showAlarm.value}")
         val wasShowingAlarm = _showAlarm.value
         stopAlarm()
         
@@ -206,12 +216,12 @@ class TimerService : Service() {
         // This bypasses the broadcast system and uses the same logic as the in-app button
         if (wasShowingAlarm) {
             // Call the ViewModel's nextTask method directly
-            println("DEBUG: TimerService calling ViewModel nextTask directly")
+            vLog("DEBUG: TimerService calling ViewModel nextTask directly")
             viewModelCallback?.invoke()
         } else {
             // For non-alarm cases, use the original broadcast system
             val intent = Intent("com.example.dowithtime.NEXT_TASK")
-            println("DEBUG: TimerService sending NEXT_TASK broadcast")
+            vLog("DEBUG: TimerService sending NEXT_TASK broadcast")
             sendBroadcast(intent)
             
             if (_isTransitioning.value) {
@@ -371,14 +381,20 @@ class TimerService : Service() {
             .setShowWhen(false)
             .setOnlyAlertOnce(true)
         
-        // Add progress bar for running tasks
+        // Add progress bar for running tasks (avoid divide-by-zero)
         if (_isRunning.value && task != null && !_showAlarm.value && !_isTransitioning.value) {
-            val totalTime = task.durationSeconds * 1000L
-            val elapsed = totalTime - timeRemaining
-            val progress = ((elapsed * 100) / totalTime).toInt()
-            
-            builder.setProgress(100, progress, false)
-                .setStyle(NotificationCompat.BigTextStyle().bigText("$text\nProgress: $progress%"))
+            val totalTime = (task.durationSeconds * 1000L).coerceAtLeast(0L)
+            if (totalTime > 0L) {
+                val clampedRemaining = timeRemaining.coerceIn(0L, totalTime)
+                val elapsed = (totalTime - clampedRemaining).coerceIn(0L, totalTime)
+                val progress = ((elapsed * 100) / totalTime).toInt()
+                builder.setProgress(100, progress, false)
+                    .setStyle(NotificationCompat.BigTextStyle().bigText("$text\nProgress: $progress%"))
+            } else {
+                // Indeterminate when duration is zero
+                builder.setProgress(0, 0, true)
+                    .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            }
         } else {
             builder.setStyle(NotificationCompat.BigTextStyle().bigText(text))
         }

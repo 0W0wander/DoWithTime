@@ -26,6 +26,9 @@ import com.example.dowithtime.data.AppData
 import com.example.dowithtime.data.SyncStatus
 
 class TaskViewModel(application: Application) : AndroidViewModel(application) {
+    // Toggle for verbose debug logging in ViewModel
+    private val enableDebugLogs = false
+    private fun vLog(msg: String) { if (enableDebugLogs) println(msg) }
     private val repository: TaskRepository
     private val cloudSync: CloudSync
     private val prefs = application.getSharedPreferences("dowithtime_app_state", android.content.Context.MODE_PRIVATE)
@@ -485,14 +488,14 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             if (isDaily) {
                 refreshDailyTasks()
             } else {
-                // Use the same list ID that was used to create the task
-                refreshTasksForCurrentList(currentListId)
-                
-                // If addToTop is true, move the task to the top of the list
                 if (addToTop) {
+                    // Move newly added task to top deterministically using fresh DB state
                     val currentTasks = repository.getIncompleteTasksByList(currentListId).first()
-                    val newTask = currentTasks.last() // The task we just added will be at the end
-                    insertTasksAtPosition(listOf(newTask), 0) // Move it to position 0 (top)
+                    val newTask = currentTasks.last()
+                    insertTasksAtPosition(listOf(newTask), 0)
+                } else {
+                    // Simple refresh when not reordering
+                    refreshTasksForCurrentList(currentListId)
                 }
             }
             uploadToCloud()
@@ -540,11 +543,12 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             if (isDaily) {
                 refreshDailyTasks()
             } else {
-                refreshTasksForCurrentList(currentListId)
                 if (addToTop) {
                     val currentTasks = repository.getIncompleteTasksByList(currentListId).first()
                     val newTask = currentTasks.last()
                     insertTasksAtPosition(listOf(newTask), 0)
+                } else {
+                    refreshTasksForCurrentList(currentListId)
                 }
             }
             uploadToCloud()
@@ -811,23 +815,34 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     
     fun insertTasksAtPosition(tasksToInsert: List<Task>, targetPosition: Int) {
         viewModelScope.launch {
-            val currentTasks = _tasks.value.toMutableList()
-            val insertIndex = targetPosition.coerceIn(0, currentTasks.size)
-            
+            // Determine target list from the tasks themselves, fallback to current list
+            val targetListId = tasksToInsert.firstOrNull()?.listId
+                ?: _currentListId.value
+                ?: _taskLists.value.firstOrNull()?.id
+                ?: return@launch
+
+            // Always fetch fresh state from DB to avoid stale UI state
+            val currentTasks = repository.getIncompleteTasksByList(targetListId).first().toMutableList()
+
             // Remove the tasks to insert from their current positions
-            val taskIdsToInsert = tasksToInsert.map { it.id }
+            val taskIdsToInsert = tasksToInsert.map { it.id }.toSet()
             currentTasks.removeAll { it.id in taskIdsToInsert }
-            
+
+            // Compute a safe insertion index based on current list size after removal
+            val insertIndex = targetPosition.coerceIn(0, currentTasks.size)
+
             // Insert the tasks at the target position
             currentTasks.addAll(insertIndex, tasksToInsert)
-            
+
             // Update all task orders to be sequential
             currentTasks.forEachIndexed { index, task ->
                 repository.updateTaskOrder(task.id, index)
             }
-            
-            // Force refresh the tasks for the current list
-            refreshTasksForCurrentList(_currentListId.value)
+
+            // Refresh the tasks for the affected list
+            if (targetListId == _currentListId.value) {
+                refreshTasksForCurrentList(targetListId)
+            }
             uploadToCloud()
         }
     }
@@ -915,7 +930,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         
         // Set up the callback for direct communication
         service.setViewModelCallback { 
-            println("DEBUG: ViewModel callback invoked, calling nextTask()")
+            vLog("DEBUG: ViewModel callback invoked, calling nextTask()")
             nextTask() 
         }
         
@@ -971,17 +986,17 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             addAction("com.example.dowithtime.NEXT_TASK_DIRECT")
             addAction("com.example.dowithtime.TRANSITION_FINISHED")
         }
-        println("DEBUG: Registering broadcast receiver with actions: ${filter.actionsIterator().asSequence().toList()}")
+        vLog("DEBUG: Registering broadcast receiver with actions: ${filter.actionsIterator().asSequence().toList()}")
         nextTaskReceiver = object : android.content.BroadcastReceiver() {
             override fun onReceive(context: android.content.Context?, intent: android.content.Intent?) {
-                println("DEBUG: Broadcast received: ${intent?.action}")
+                vLog("DEBUG: Broadcast received: ${intent?.action}")
                 when (intent?.action) {
                     "com.example.dowithtime.NEXT_TASK" -> {
                         // Delegate to unified nextTask() which handles subtasks and completion
                         nextTask()
                     }
                     "com.example.dowithtime.NEXT_TASK_DIRECT" -> {
-                        println("DEBUG: NEXT_TASK_DIRECT broadcast received, calling nextTask() directly")
+                        vLog("DEBUG: NEXT_TASK_DIRECT broadcast received, calling nextTask() directly")
                         // Call the same method that the in-app button uses
                         nextTask()
                     }
@@ -993,7 +1008,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         getApplication<Application>().registerReceiver(nextTaskReceiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED)
-        println("DEBUG: Broadcast receiver registered successfully")
+        vLog("DEBUG: Broadcast receiver registered successfully")
     }
     
     fun startCurrentTask() {
@@ -1217,12 +1232,12 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     }
     
     private suspend fun moveToNextTask() {
-        println("DEBUG: moveToNextTask called")
+        vLog("DEBUG: moveToNextTask called")
         val nextTask = getNextTask()
-        println("DEBUG: Next task found: ${nextTask?.title}")
+        vLog("DEBUG: Next task found: ${nextTask?.title}")
         
         if (nextTask != null) {
-            println("DEBUG: Setting current task to: ${nextTask.title}")
+            vLog("DEBUG: Setting current task to: ${nextTask.title}")
             _currentTask.value = nextTask
             // If next task has subtasks, start with its first subtask
             val subtasks = repository.getSubtasksForTask(nextTask.id).first()
@@ -1249,7 +1264,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 }
             }
         } else {
-            println("DEBUG: No next task found, stopping timer")
+            vLog("DEBUG: No next task found, stopping timer")
             stopTimer()
             // Only notify if we're in an active session
             if (_isInActiveSession.value) {
@@ -1279,13 +1294,13 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             val latestListTasks = repository.getIncompleteTasksByList(listId).first()
 
             // Debug: Print the current tasks to see what's available for this list
-            println("DEBUG: Current incomplete tasks for list $listId: ${latestListTasks.map { it.title }}")
+            vLog("DEBUG: Current incomplete tasks for list $listId: ${latestListTasks.map { it.title }}")
 
             latestListTasks.firstOrNull()
         }
         
         // Debug: Print the selected next task
-        println("DEBUG: Selected next task: ${nextTask?.title}")
+        vLog("DEBUG: Selected next task: ${nextTask?.title}")
         
         // Update the StateFlow for UI consumption
         _nextTask.value = nextTask
@@ -1307,8 +1322,10 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         // Set the time remaining to the current task's duration
         _currentTask.value?.let { task ->
             _timeRemaining.value = task.durationSeconds * 1000L
-            // Update the TimerService with the current task and its duration
-            timerService?.updateTask(task)
+            // Update the TimerService only when timers are enabled and duration > 0
+            if (!_disableTimers.value && task.durationSeconds > 0) {
+                timerService?.updateTask(task)
+            }
         }
     }
     
@@ -1409,7 +1426,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val currentListId = listId ?: _currentListId.value ?: _taskLists.value.firstOrNull()?.id ?: 1
             repository.getIncompleteTasksByList(currentListId).collect { taskList ->
-                println("DEBUG: refreshTasksForCurrentList - tasks: ${taskList.map { it.title }}")
+                vLog("DEBUG: refreshTasksForCurrentList - tasks: ${taskList.map { it.title }}")
                 _tasks.value = taskList
                 // Update the incomplete tasks state with the current list's tasks
                 repository.updateIncompleteTasksState(taskList)
