@@ -1194,18 +1194,54 @@ fun EditTaskDialog(
                         }
                         if (advancedExpanded) {
                             if (!integrated) Divider()
-                            if (!showSubtaskEditor) {
+                            if (subtasks.isEmpty() && !showSubtaskEditor) {
+                                // No subtasks yet: present Add Subtasks and Premade Tasks actions (like Add Task dialog)
                                 Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(12.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Button(onClick = { showSubtaskEditor = true }) {
-                                        Text("Manage Subtasks")
+                                    // Add Subtasks button opens the Add/Edit Subtask popup in add mode
+                                    Button(onClick = {
+                                        editingSubtask = null
+                                        editSubTitle = ""
+                                        editSubMinutes = ""
+                                        editSubSeconds = ""
+                                        showEditSubDialog = true
+                                    }) { Text("Add Subtasks") }
+
+                                    // Premade Tasks dropdown reused from Add Task dialog
+                                    var presetsExpanded by remember { mutableStateOf(false) }
+                                    var selectedPresetName by remember { mutableStateOf("") }
+                                    val allLists by viewModel.taskLists.collectAsState()
+                                    val premadePrefix = "Premade: "
+                                    val premadeLists = allLists.filter { it.name.startsWith(premadePrefix) }
+                                    val localScope = rememberCoroutineScope()
+                                    Box {
+                                        Button(onClick = { presetsExpanded = true }) { Text(if (selectedPresetName.isBlank()) "Premade Tasks" else selectedPresetName) }
+                                        DropdownMenu(expanded = presetsExpanded, onDismissRequest = { presetsExpanded = false }) {
+                                            premadeLists.forEach { list ->
+                                                DropdownMenuItem(text = { Text(list.name.removePrefix(premadePrefix)) }, onClick = {
+                                                    selectedPresetName = list.name.removePrefix(premadePrefix)
+                                                    presetsExpanded = false
+                                                    // Import subtasks from selected premade list into this task
+                                                    localScope.launch {
+                                                        val listTasks = viewModel.fetchTasksForListOnce(list.id)
+                                                        listTasks.sortedBy { it.order }.forEach { t ->
+                                                            val subs = viewModel.fetchSubtasksForTaskOnce(t.id)
+                                                            val seconds = if (subs.isNotEmpty()) subs.sumOf { it.durationSeconds } else t.durationSeconds
+                                                            viewModel.addSubtask(task.id, t.title, seconds)
+                                                        }
+                                                        showSubtaskEditor = true
+                                                    }
+                                                })
+                                            }
+                                        }
                                     }
                                 }
-                            } else {
+                            } else if (showSubtaskEditor) {
                                 // Subtasks editor takes majority of dialog space (mini list view)
                                 Column(
                                     modifier = Modifier
@@ -1780,8 +1816,9 @@ fun PasteToListDialog(
                         onDismissRequest = { expanded = false },
                         modifier = Modifier.fillMaxWidth()
                     ) {
-                        // Regular lists
-                        taskLists.forEach { list ->
+                        // Regular lists (exclude premade lists from destinations)
+                        val destinationLists = taskLists.filter { !it.name.startsWith("Premade: ") }
+                        destinationLists.forEach { list ->
                             DropdownMenuItem(
                                 text = { Text(list.name) },
                                 onClick = {

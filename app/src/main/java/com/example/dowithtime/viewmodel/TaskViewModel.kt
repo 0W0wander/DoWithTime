@@ -1374,10 +1374,11 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
 
         // Reorder to place the block at the requested position
         val targetTasks = repository.getIncompleteTasksByList(targetListId).first().toMutableList()
-        val safeIndex = targetPosition.coerceIn(0, targetTasks.size - insertedNewTasks.size).coerceAtLeast(0)
         // Pull out the inserted tasks by their new IDs, then reinsert at desired index
         val byId = insertedNewTasks.map { it.id }.toSet()
         val existingWithoutInserted = targetTasks.filter { it.id !in byId }.toMutableList()
+        // Compute a safe insertion index relative to the existing tasks (excluding the just-inserted ones)
+        val safeIndex = targetPosition.coerceIn(0, existingWithoutInserted.size)
         existingWithoutInserted.addAll(safeIndex, insertedNewTasks)
         existingWithoutInserted.forEachIndexed { idx, task -> repository.updateTaskOrder(task.id, idx) }
 
