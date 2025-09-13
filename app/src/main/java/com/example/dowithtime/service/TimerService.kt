@@ -57,6 +57,7 @@ class TimerService : Service() {
         const val ACTION_SKIP_TRANSITION = "SKIP_TRANSITION"
         const val ACTION_STOP_ALARM = "STOP_ALARM"
         const val ACTION_TRANSITION_FINISHED = "TRANSITION_FINISHED"
+        const val ACTION_SUBTASK_TRANSITION = "SUBTASK_TRANSITION"
     }
     
     inner class TimerBinder : Binder() {
@@ -85,6 +86,7 @@ class TimerService : Service() {
             ACTION_NEXT_TASK -> nextTask()
             ACTION_SKIP_TRANSITION -> skipTransition()
             ACTION_STOP_ALARM -> stopAlarm()
+            ACTION_SUBTASK_TRANSITION -> startTransition()
         }
         return START_NOT_STICKY
     }

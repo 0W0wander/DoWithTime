@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
 import android.os.Bundle
+import android.os.Environment
 import android.os.IBinder
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -40,6 +41,32 @@ class MainActivity : ComponentActivity() {
     
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Global crash logger: write to Downloads/DoWithTime_crash.log
+        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
+            try {
+                val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                if (downloads != null) {
+                    val logTxt = java.io.File(downloads, "log.txt")
+                    val sw = java.io.StringWriter()
+                    val pw = java.io.PrintWriter(sw)
+                    throwable.printStackTrace(pw)
+                    pw.flush()
+                    val content = "==== Crash at ${java.util.Date()} on thread ${thread.name} ====${System.lineSeparator()}" +
+                        sw.toString() + System.lineSeparator()
+                    logTxt.appendText(content)
+                    // Clean up legacy separate crash log if present
+                    try {
+                        val oldLog = java.io.File(downloads, "DoWithTime_crash.log")
+                        if (oldLog.exists()) oldLog.delete()
+                    } catch (_: Exception) { }
+                }
+            } catch (_: Exception) {
+            } finally {
+                // Re-throw to let the system handle the crash normally
+                android.os.Process.killProcess(android.os.Process.myPid())
+                kotlin.system.exitProcess(10)
+            }
+        }
         
         // Bind to TimerService
         Intent(this, TimerService::class.java).also { intent ->

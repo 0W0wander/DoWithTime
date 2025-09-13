@@ -64,6 +64,8 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     // Add callback for when all tasks are completed
     private var _onAllTasksCompleted: (() -> Unit)? = null
     private var _isInActiveSession = MutableStateFlow(false)
+    // Pending next subtask to start after a transition screen
+    private var _pendingNextSubtask: Subtask? = null
     
     fun setOnAllTasksCompletedCallback(callback: () -> Unit) {
         _onAllTasksCompleted = callback
@@ -967,10 +969,29 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             service.isTransitioning.collect { transitioning ->
                 val wasTransitioning = _isTransitioning.value
                 _isTransitioning.value = transitioning
-                // Only move to next task if we were actually transitioning and now we're not
+                // When transition ends, either start pending subtask or move to next task
                 if (wasTransitioning && !transitioning) {
-                    // When transition ends, move to next task
-                    moveToNextTask()
+                    val pending = _pendingNextSubtask
+                    if (pending != null) {
+                        // Start the pending subtask now
+                        _currentTask.value?.let { parentTask ->
+                            _currentSubtask.value = pending
+                            _timeRemaining.value = pending.durationSeconds * 1000L
+                            currentStartedAtMs = System.currentTimeMillis()
+                            if (!_disableTimers.value) {
+                                timerService?.startTask(
+                                    parentTask.copy(
+                                        title = pending.title,
+                                        durationSeconds = pending.durationSeconds
+                                    )
+                                )
+                            }
+                        }
+                        _pendingNextSubtask = null
+                    } else {
+                        // No subtask pending; proceed to next task
+                        moveToNextTask()
+                    }
                 }
             }
         }
@@ -1106,24 +1127,30 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                 if (subtasks.isNotEmpty()) {
                     val currentIndex = subtasks.indexOfFirst { it.id == currentSub?.id }
                     if (currentIndex != -1 && currentIndex < subtasks.size - 1) {
-                        // Move to next subtask within the same task
+                        // Move to next subtask within the same task, but first transition
                         val nextSubtask = subtasks[currentIndex + 1]
                         // Log time for the subtask we just finished
                         addCtdadForCurrentSegment(currentTask)
                         // Remove the completed subtask from the task
                         currentSub?.let { repository.deleteSubtask(it.id) }
-                        _currentSubtask.value = nextSubtask
-                        _timeRemaining.value = nextSubtask.durationSeconds * 1000L
-                        currentStartedAtMs = System.currentTimeMillis()
-                        if (_disableTimers.value) {
-                            // In timerless mode, wait for user to press Next again
+                        _currentSubtask.value = null
+                        _timeRemaining.value = 0
+                        // Queue the next subtask to start after transition ends
+                        _pendingNextSubtask = nextSubtask
+                        if (!_disableTimers.value) {
+                            // Trigger the same 10s transition used between tasks
+                            val intent = android.content.Intent(getApplication(), TimerService::class.java).apply {
+                                action = TimerService.ACTION_SUBTASK_TRANSITION
+                            }
+                            getApplication<Application>().startService(intent)
                         } else {
-                            timerService?.startTask(
-                                currentTask.copy(
-                                    title = nextSubtask.title,
-                                    durationSeconds = nextSubtask.durationSeconds
-                                )
-                            )
+                            // In timerless mode, immediately start the queued subtask
+                            _pendingNextSubtask?.let { pending ->
+                                _currentSubtask.value = pending
+                                _timeRemaining.value = pending.durationSeconds * 1000L
+                                currentStartedAtMs = System.currentTimeMillis()
+                                _pendingNextSubtask = null
+                            }
                         }
                         return@launch
                     } else if (currentIndex == subtasks.size - 1) {
