@@ -43,6 +43,8 @@ class TimerService : Service() {
     
     private val _transitionTime = MutableStateFlow(10)
     val transitionTime: StateFlow<Int> = _transitionTime
+    // Optional label for what's coming next during transition (e.g., subtask title)
+    private var transitionTitle: String? = null
     
     companion object {
         const val CHANNEL_ID = "TimerChannel"
@@ -83,10 +85,16 @@ class TimerService : Service() {
             ACTION_PAUSE -> pauseTimer()
             ACTION_STOP -> stopTimer()
             ACTION_RESET -> resetTimer()
-            ACTION_NEXT_TASK -> nextTask()
+            ACTION_NEXT_TASK -> {
+                transitionTitle = intent.getStringExtra("next_title")
+                nextTask()
+            }
             ACTION_SKIP_TRANSITION -> skipTransition()
             ACTION_STOP_ALARM -> stopAlarm()
-            ACTION_SUBTASK_TRANSITION -> startTransition()
+            ACTION_SUBTASK_TRANSITION -> {
+                transitionTitle = intent.getStringExtra("next_title")
+                startTransition()
+            }
         }
         return START_NOT_STICKY
     }
@@ -238,6 +246,7 @@ class TimerService : Service() {
     private fun skipTransition() {
         transitionTimer?.cancel()
         _isTransitioning.value = false
+        transitionTitle = null
         // Send broadcast to notify ViewModel to handle next task
         val intent = Intent("com.example.dowithtime.TRANSITION_FINISHED")
         sendBroadcast(intent)
@@ -256,6 +265,7 @@ class TimerService : Service() {
             
             override fun onFinish() {
                 _isTransitioning.value = false
+                transitionTitle = null
                 // Send broadcast to notify ViewModel to handle next task
                 val intent = Intent("com.example.dowithtime.TRANSITION_FINISHED")
                 sendBroadcast(intent)
@@ -316,13 +326,16 @@ class TimerService : Service() {
         
         val title = when {
             _showAlarm.value -> "Time's Up!"
-            _isTransitioning.value -> "Next task in ${_transitionTime.value}s"
+            _isTransitioning.value -> "Next in ${_transitionTime.value}s"
             else -> task?.title ?: "No task"
         }
         
         val text = when {
             _showAlarm.value -> "Task time has expired"
-            _isTransitioning.value -> "Preparing next task..."
+            _isTransitioning.value -> {
+                val label = transitionTitle
+                if (!label.isNullOrBlank()) "Next: $label" else "Preparing next task..."
+            }
             _isRunning.value -> "Time remaining: $timeText"
             else -> "Timer paused"
         }

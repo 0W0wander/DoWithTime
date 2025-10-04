@@ -130,6 +130,9 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
     private val _disableTimers = MutableStateFlow(false)
     val disableTimers: StateFlow<Boolean> = _disableTimers.asStateFlow()
     
+    // Keep only a single active collector for the current list's tasks
+    private var tasksCollectJob: kotlinx.coroutines.Job? = null
+    
     // Flag to prevent multiple creations of the default "Inbox" list
     private val _defaultInboxCreated = MutableStateFlow(false)
     // First-run notification prompt
@@ -1138,9 +1141,10 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
                         // Queue the next subtask to start after transition ends
                         _pendingNextSubtask = nextSubtask
                         if (!_disableTimers.value) {
-                            // Trigger the same 10s transition used between tasks
+                            // Trigger the same 10s transition used between tasks, with next subtask title
                             val intent = android.content.Intent(getApplication(), TimerService::class.java).apply {
                                 action = TimerService.ACTION_SUBTASK_TRANSITION
+                                putExtra("next_title", nextSubtask.title)
                             }
                             getApplication<Application>().startService(intent)
                         } else {
@@ -1450,7 +1454,9 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
     fun refreshTasksForCurrentList(listId: Int? = null) {
-        viewModelScope.launch {
+        // Cancel any existing collector to avoid multiple flows racing and overriding state
+        tasksCollectJob?.cancel()
+        tasksCollectJob = viewModelScope.launch {
             val currentListId = listId ?: _currentListId.value ?: _taskLists.value.firstOrNull()?.id ?: 1
             repository.getIncompleteTasksByList(currentListId).collect { taskList ->
                 vLog("DEBUG: refreshTasksForCurrentList - tasks: ${taskList.map { it.title }}")
@@ -1523,5 +1529,7 @@ class TaskViewModel(application: Application) : AndroidViewModel(application) {
             getApplication<Application>().unregisterReceiver(receiver)
             nextTaskReceiver = null
         }
+        // Cancel tasks flow collection
+        tasksCollectJob?.cancel()
     }
 }
